@@ -1,2 +1,37 @@
+# =========================
+# Core framework
+# =========================
 fastapi
 uvicorn
+
+# =========================
+# Seguridad / autenticación
+# =========================
+passlib[bcrypt]
+python-jose[cryptography]
+
+# =========================
+# Configuración
+# =========================
+python-dotenv
+
+# =========================
+# Validación de datos
+# =========================
+pydantic
+
+# =========================
+# HTTP / async (integraciones futuras)
+# =========================
+httpx
+
+# =========================
+# Base de datos (inevitable en ficha clínica)
+# =========================
+sqlalchemy
+psycopg2-binary
+
+# =========================
+# Testing básico
+# =========================
+pytest
