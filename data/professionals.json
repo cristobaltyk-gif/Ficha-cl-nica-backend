@@ -1,0 +1,25 @@
+{
+  "doc1": {
+    "id": "doc1",
+    "name": "Dr. Cristóbal Huerta",
+    "specialty": "Cadera",
+    "active": true,
+    "schedule": {
+      "start": "09:00",
+      "end": "13:00",
+      "slotMinutes": 30
+    }
+  },
+
+  "doc2": {
+    "id": "doc2",
+    "name": "Dr. Jaime Espinoza",
+    "specialty": "Rodilla",
+    "active": true,
+    "schedule": {
+      "start": "14:00",
+      "end": "18:00",
+      "slotMinutes": 30
+    }
+  }
+}
