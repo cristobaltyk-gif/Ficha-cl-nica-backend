@@ -7,9 +7,12 @@ app = FastAPI(
     version="0.1"
 )
 
+# ✅ CORS CORRECTO (FastAPI)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # luego se restringe
+    allow_origins=[
+        "https://ficha-cl-nica-ica-fronted-towr-81ykwv7y2.vercel.app"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
