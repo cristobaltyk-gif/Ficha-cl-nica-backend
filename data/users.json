@@ -1,0 +1,17 @@
+{
+  "admin": {
+    "password": "admin123",
+    "role": "ADMIN",
+    "active": true
+  },
+  "secretaria1": {
+    "password": "secre123",
+    "role": "SECRETARIA",
+    "active": true
+  },
+  "medico1": {
+    "password": "medico123",
+    "role": "MEDICO",
+    "active": true
+  }
+}
