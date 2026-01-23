@@ -1,3 +1,4 @@
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from auth.auth_service import login_router
@@ -7,12 +8,15 @@ app = FastAPI(
     version="0.1"
 )
 
-# ✅ CORS CORRECTO (FastAPI)
+# ✅ ORIGEN DESDE ENTORNO
+FRONTEND_URL = os.getenv("FRONTEND_URL")
+
+if not FRONTEND_URL:
+    raise RuntimeError("Falta variable FRONTEND_URL en Render")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://ficha-cl-nica-ica-fronted-towr-81ykwv7y2.vercel.app"
-    ],
+    allow_origins=[FRONTEND_URL],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
