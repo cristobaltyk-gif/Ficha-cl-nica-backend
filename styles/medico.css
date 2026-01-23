@@ -1,0 +1,28 @@
+.medico-container {
+  min-height: 100vh;
+  background: #f8fafc;
+}
+
+.medico-actions {
+  padding: 14px 20px 0 20px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.logout {
+  border: 1px solid #cbd5f5;
+  background: white;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.logout:hover {
+  background: #f1f5f9;
+}
+
+.hint {
+  font-size: 14px;
+  color: #475569;
+  line-height: 1.4;
+}
