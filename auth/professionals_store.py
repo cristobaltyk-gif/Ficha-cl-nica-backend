@@ -8,4 +8,19 @@ def load_professionals():
         return {}
 
     with open(DATA_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+        professionals = json.load(f)
+
+    # 🔒 Regla clínica: sin horario → no hay agenda
+    valid = {}
+
+    for pid, p in professionals.items():
+        if not p.get("active"):
+            continue
+
+        if "schedule" not in p:
+            # profesional mal configurado → se excluye
+            continue
+
+        valid[pid] = p
+
+    return valid
