@@ -2,22 +2,25 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-# Routers (módulos separados)
-from auth.auth_service import login_router
-from routes.agenda_router import agenda_router
+# ==========================
+# Routers
+# ==========================
 
-# ======================================================
-# APP CORE (ORQUESTADOR)
-# ======================================================
+from auth.auth_service import login_router
+from agenda.router import router as agenda_router  # ✅ AGENDA NUEVA
+
+# ==========================
+# APP CORE
+# ==========================
 
 app = FastAPI(
     title="Ficha Clínica – Backend",
-    version="0.1"
+    version="1.0"
 )
 
-# ======================================================
-# CORS (POR ENTORNO)
-# ======================================================
+# ==========================
+# CORS (por entorno)
+# ==========================
 
 FRONTEND_URL = os.getenv("FRONTEND_URL")
 
@@ -32,23 +35,27 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ======================================================
-# ROUTERS (ORQUESTACIÓN PURA)
-# ======================================================
+# ==========================
+# ROUTERS
+# ==========================
 
-# 🔐 Login
+# 🔐 Autenticación
 app.include_router(login_router)
 
-# 📅 Agenda secretaria
+# 📅 Agenda (nueva arquitectura)
 app.include_router(agenda_router)
 
-# ======================================================
+# ==========================
 # HEALTHCHECK
-# ======================================================
+# ==========================
 
 @app.get("/")
 def root():
     return {
         "status": "ok",
-        "service": "Ficha Clínica Backend"
+        "service": "Ficha Clínica Backend",
+        "modules": [
+            "auth",
+            "agenda"
+        ]
     }
