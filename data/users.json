@@ -1,17 +1,45 @@
 {
   "admin": {
     "password": "admin123",
-    "role": "admin",
-    "active": true
+    "active": true,
+    "role": {
+      "name": "ADMIN",
+      "entry": "/administracion",
+      "allow": [
+        "/agenda",
+        "/pacientes",
+        "/atencion",
+        "/documentos",
+        "/administracion"
+      ]
+    }
   },
+
   "secretaria1": {
     "password": "secre123",
-    "role": "secretaria",
-    "active": true
+    "active": true,
+    "role": {
+      "name": "SECRETARIA",
+      "entry": "/secretaria",
+      "allow": [
+        "/agenda",
+        "/pacientes",
+        "/documentos"
+      ]
+    }
   },
+
   "medico1": {
     "password": "medico123",
-    "role": "medico",
-    "active": true
+    "active": true,
+    "role": {
+      "name": "MEDICO",
+      "entry": "/agenda",
+      "allow": [
+        "/agenda",
+        "/atencion",
+        "/documentos"
+      ]
+    }
   }
 }
