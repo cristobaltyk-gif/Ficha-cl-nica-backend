@@ -5,39 +5,26 @@ from auth.users_store import USERS
 login_router = APIRouter()
 
 # ===============================
-# DEFINICIÓN CANÓNICA DE ROLES
-# (OBJETO, NO STRING)
+# ROLES CANÓNICOS
 # ===============================
-ROLES: dict[str, dict] = {
+ROLES = {
     "secretaria": {
         "name": "secretaria",
         "entry": "/secretaria",
-        "allow": [
-            "/agenda",
-            "/pacientes"
-        ]
+        "allow": ["agenda", "pacientes"]
     },
     "medico": {
         "name": "medico",
-        "entry": "/agenda",
-        "allow": [
-            "/agenda",
-            "/atencion",
-            "/documentos"
-        ]
+        "entry": "/medico",
+        "allow": ["agenda", "pacientes", "fichas"]
     },
     "admin": {
         "name": "admin",
-        "entry": "/administracion",
-        "allow": [
-            "/agenda",
-            "/pacientes",
-            "/atencion",
-            "/documentos",
-            "/administracion"
-        ]
+        "entry": "/admin",
+        "allow": ["agenda", "pacientes", "fichas", "usuarios"]
     }
 }
+
 
 # ===============================
 # LOGIN
@@ -45,30 +32,28 @@ ROLES: dict[str, dict] = {
 @login_router.post("/login", response_model=LoginResponse)
 def login(data: LoginRequest):
 
-    # 1️⃣ Usuario existe
     user = USERS.get(data.usuario)
+
     if not user:
         raise HTTPException(status_code=401, detail="Usuario no existe")
 
-    # 2️⃣ Usuario activo
-    if not user.get("active", False):
+    if not user["active"]:
         raise HTTPException(status_code=401, detail="Usuario desactivado")
 
-    # 3️⃣ Password correcta
-    if user.get("password") != data.clave:
+    if user["password"] != data.clave:
         raise HTTPException(status_code=401, detail="Clave incorrecta")
 
-    # 4️⃣ Rol válido
-    role_name = user.get("role")
+    # ✅ ROLE debe ser string
+    role_name = user["role"]
+
+    if isinstance(role_name, dict):
+        role_name = role_name.get("name")
+
     if role_name not in ROLES:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Rol '{role_name}' mal configurado en backend"
-        )
+        raise HTTPException(status_code=500, detail="Rol inválido")
 
     role_data = ROLES[role_name]
 
-    # 5️⃣ Respuesta FINAL (OBJETO)
     return LoginResponse(
         usuario=data.usuario,
         role=RoleSchema(**role_data)
