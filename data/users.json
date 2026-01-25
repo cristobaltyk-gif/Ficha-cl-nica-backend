@@ -2,18 +2,30 @@
   "admin": {
     "password": "admin123",
     "active": true,
-    "role": "admin"
+    "role": {
+      "name": "admin",
+      "entry": "/admin",
+      "allow": ["agenda", "pacientes", "admin"]
+    }
   },
 
   "secretaria1": {
     "password": "secre123",
     "active": true,
-    "role": "secretaria"
+    "role": {
+      "name": "secretaria",
+      "entry": "/secretaria",
+      "allow": ["agenda", "pacientes"]
+    }
   },
 
   "medico1": {
     "password": "medico123",
     "active": true,
-    "role": "medico"
+    "role": {
+      "name": "medico",
+      "entry": "/medico",
+      "allow": ["agenda", "pacientes", "fichas"]
+    }
   }
 }
