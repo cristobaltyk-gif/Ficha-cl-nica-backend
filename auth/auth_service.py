@@ -1,49 +1,75 @@
 from fastapi import APIRouter, HTTPException
-from models.schemas import LoginRequest, LoginResponse
+from models.schemas import LoginRequest, LoginResponse, RoleSchema
 from auth.users_store import USERS
 
 login_router = APIRouter()
 
 # ===============================
 # DEFINICIÓN CANÓNICA DE ROLES
+# (OBJETO, NO STRING)
 # ===============================
-ROLES = {
+ROLES: dict[str, dict] = {
     "secretaria": {
         "name": "secretaria",
         "entry": "/secretaria",
-        "allow": ["agenda", "pacientes"]
+        "allow": [
+            "/agenda",
+            "/pacientes"
+        ]
     },
     "medico": {
         "name": "medico",
         "entry": "/agenda",
-        "allow": ["agenda", "atencion", "documentos"]
+        "allow": [
+            "/agenda",
+            "/atencion",
+            "/documentos"
+        ]
     },
     "admin": {
         "name": "admin",
         "entry": "/administracion",
-        "allow": ["agenda", "pacientes", "atencion", "documentos", "administracion"]
+        "allow": [
+            "/agenda",
+            "/pacientes",
+            "/atencion",
+            "/documentos",
+            "/administracion"
+        ]
     }
 }
 
+# ===============================
+# LOGIN
+# ===============================
 @login_router.post("/login", response_model=LoginResponse)
 def login(data: LoginRequest):
-    user = USERS.get(data.usuario)
 
+    # 1️⃣ Usuario existe
+    user = USERS.get(data.usuario)
     if not user:
         raise HTTPException(status_code=401, detail="Usuario no existe")
 
-    if not user["active"]:
+    # 2️⃣ Usuario activo
+    if not user.get("active", False):
         raise HTTPException(status_code=401, detail="Usuario desactivado")
 
-    if user["password"] != data.clave:
+    # 3️⃣ Password correcta
+    if user.get("password") != data.clave:
         raise HTTPException(status_code=401, detail="Clave incorrecta")
 
-    role_name = user["role"]
-
+    # 4️⃣ Rol válido
+    role_name = user.get("role")
     if role_name not in ROLES:
-        raise HTTPException(status_code=500, detail="Rol mal configurado en backend")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Rol '{role_name}' mal configurado en backend"
+        )
 
+    role_data = ROLES[role_name]
+
+    # 5️⃣ Respuesta FINAL (OBJETO)
     return LoginResponse(
         usuario=data.usuario,
-        role=ROLES[role_name]
+        role=RoleSchema(**role_data)
     )
