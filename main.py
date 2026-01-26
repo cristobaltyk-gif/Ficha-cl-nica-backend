@@ -7,7 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 # ==========================
 
 from auth.auth_service import login_router
-from agenda.router import router as agenda_router  # ✅ AGENDA NUEVA
+from agenda.router import router as agenda_router  # ✅ Agenda diaria
+from agenda.summary_router import router as agenda_summary_router  # ✅ Resumen mensual/semanal
 
 # ==========================
 # APP CORE
@@ -39,11 +40,14 @@ app.add_middleware(
 # ROUTERS
 # ==========================
 
-# 🔐 Autenticación
+# 🔐 Auth
 app.include_router(login_router)
 
-# 📅 Agenda (nueva arquitectura)
+# 📅 Agenda diaria
 app.include_router(agenda_router)
+
+# 📅 Agenda resumen (calendario mensual/semanal)
+app.include_router(agenda_summary_router)
 
 # ==========================
 # HEALTHCHECK
@@ -56,6 +60,7 @@ def root():
         "service": "Ficha Clínica Backend",
         "modules": [
             "auth",
-            "agenda"
+            "agenda",
+            "agenda-summary"
         ]
     }
