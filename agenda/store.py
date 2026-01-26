@@ -14,7 +14,7 @@ LOCK = Lock()
 
 
 # =============================
-# Helpers internos
+# Helpers
 # =============================
 def _utc_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -24,6 +24,7 @@ def _ensure_base(store: Dict[str, Any]) -> None:
     store.setdefault("meta", {})
     store.setdefault("calendar", {})
     store.setdefault("index_by_time", {})
+
     store["meta"].setdefault("version", 1)
     store["meta"]["updated_at"] = _utc_iso()
 
@@ -31,8 +32,6 @@ def _ensure_base(store: Dict[str, Any]) -> None:
 def _ensure_day_professional(store: Dict[str, Any], date: str, professional: str) -> None:
     store["calendar"].setdefault(date, {})
     store["calendar"][date].setdefault(professional, {
-        # schedule es opcional y editable (no obligatorio)
-        # se puede definir después desde otro endpoint
         "schedule": {},
         "slots": {}
     })
@@ -41,43 +40,49 @@ def _ensure_day_professional(store: Dict[str, Any], date: str, professional: str
 
 
 # =============================
-# Lectura / Escritura base
+# Lectura / Escritura BASE
+# (SIN LOCK)
 # =============================
 def load_store() -> Dict[str, Any]:
     """
-    Lee el JSON completo de agenda.
+    Lee el JSON completo.
+    NO usa lock interno.
     """
-    with LOCK:
-        if not DATA_PATH.exists():
-            # Inicializa archivo si no existe
-            DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
-            base = {
-                "meta": {
-                    "version": 1,
-                    "updated_at": _utc_iso()
-                },
-                "calendar": {},
-                "index_by_time": {}
-            }
-            DATA_PATH.write_text(json.dumps(base, indent=2, ensure_ascii=False), encoding="utf-8")
-            return base
+    if not DATA_PATH.exists():
+        DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(DATA_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
+        base = {
+            "meta": {
+                "version": 1,
+                "updated_at": _utc_iso()
+            },
+            "calendar": {},
+            "index_by_time": {}
+        }
+
+        DATA_PATH.write_text(
+            json.dumps(base, indent=2, ensure_ascii=False),
+            encoding="utf-8"
+        )
+        return base
+
+    with open(DATA_PATH, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
 def save_store(store: Dict[str, Any]) -> None:
     """
-    Escribe el JSON completo de agenda (atómico bajo lock).
+    Escribe el JSON completo.
+    NO usa lock interno.
     """
-    with LOCK:
-        _ensure_base(store)
-        with open(DATA_PATH, "w", encoding="utf-8") as f:
-            json.dump(store, f, indent=2, ensure_ascii=False)
+    _ensure_base(store)
+
+    with open(DATA_PATH, "w", encoding="utf-8") as f:
+        json.dump(store, f, indent=2, ensure_ascii=False)
 
 
 # =============================
-# Lecturas específicas (NO mutan)
+# Lecturas específicas
 # =============================
 def read_day(date: str) -> Dict[str, Any]:
     store = load_store()
@@ -85,16 +90,12 @@ def read_day(date: str) -> Dict[str, Any]:
 
 
 def read_occupancy(date: str, time: str) -> Dict[str, str]:
-    """
-    Devuelve ocupación por profesional a una hora dada.
-    """
     store = load_store()
     return store.get("index_by_time", {}).get(date, {}).get(time, {})
 
 
 # =============================
-# Mutaciones básicas (SIN reglas)
-# Las reglas viven en service.py
+# Mutaciones (CON LOCK)
 # =============================
 def set_slot(
     *,
@@ -105,22 +106,19 @@ def set_slot(
     rut: str | None = None
 ) -> None:
     """
-    Crea/actualiza un slot en calendar e index_by_time.
-    NO valida futuro, NO valida choques.
+    Guarda slot en calendar e index_by_time.
     """
     with LOCK:
         store = load_store()
         _ensure_base(store)
         _ensure_day_professional(store, date, professional)
 
-        # --- calendar ---
         slot = {"status": status}
         if rut:
             slot["rut"] = rut
 
         store["calendar"][date][professional]["slots"][time] = slot
 
-        # --- index_by_time ---
         store["index_by_time"][date].setdefault(time, {})
         store["index_by_time"][date][time][professional] = status
 
@@ -134,7 +132,7 @@ def clear_slot(
     professional: str
 ) -> None:
     """
-    Elimina un slot (lo deja como available implícito).
+    Elimina slot (available implícito).
     """
     with LOCK:
         store = load_store()
@@ -144,6 +142,7 @@ def clear_slot(
         day = store.get("calendar", {}).get(date, {})
         prof = day.get(professional, {})
         slots = prof.get("slots", {})
+
         if time in slots:
             del slots[time]
 
@@ -157,24 +156,18 @@ def clear_slot(
         save_store(store)
 
 
-# =============================
-# Limpieza (pasado)
-# =============================
 def cleanup_past(*, keep_from_date: str) -> None:
     """
-    Elimina días completos anteriores a keep_from_date (YYYY-MM-DD).
-    La lógica de 'qué es pasado' se decide fuera (service/cron).
+    Borra días anteriores a keep_from_date.
     """
     with LOCK:
         store = load_store()
         _ensure_base(store)
 
-        # calendar
         for d in list(store.get("calendar", {}).keys()):
             if d < keep_from_date:
                 del store["calendar"][d]
 
-        # index_by_time
         for d in list(store.get("index_by_time", {}).keys()):
             if d < keep_from_date:
                 del store["index_by_time"][d]
