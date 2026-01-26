@@ -4,8 +4,14 @@
     "active": true,
     "role": {
       "name": "admin",
-      "entry": "/admin",
-      "allow": ["agenda", "pacientes", "admin"]
+      "entry": "/administracion",
+      "allow": [
+        "agenda",
+        "pacientes",
+        "atencion",
+        "documentos",
+        "administracion"
+      ]
     }
   },
 
@@ -15,7 +21,10 @@
     "role": {
       "name": "secretaria",
       "entry": "/secretaria",
-      "allow": ["agenda", "pacientes"]
+      "allow": [
+        "agenda",
+        "pacientes"
+      ]
     }
   },
 
@@ -25,7 +34,25 @@
     "role": {
       "name": "medico",
       "entry": "/medico",
-      "allow": ["agenda", "pacientes", "fichas"]
+      "allow": [
+        "agenda",
+        "pacientes",
+        "atencion",
+        "documentos"
+      ]
+    }
+  },
+
+  "kine1": {
+    "password": "kine123",
+    "active": true,
+    "role": {
+      "name": "kinesiologia",
+      "entry": "/kine",
+      "allow": [
+        "agenda",
+        "pacientes"
+      ]
     }
   }
 }
