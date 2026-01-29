@@ -8,10 +8,10 @@ from agenda import store
 # ======================================================
 # CANÓNICO ICA — SUMMARY ENGINE
 # ------------------------------------------------------
-# ✔ Calcula disponibilidad mensual y semanal
+# ✔ Calcula disponibilidad mensual, semanal y por rango
 # ✔ NO muta agenda
 # ✔ SOLO lectura de agenda_future.json
-# ✔ Preparado para paciente online booking
+# ✔ Compatible con router legacy + start_date
 # ======================================================
 
 # =============================
@@ -63,12 +63,53 @@ def _count_free_slots(day_data: Dict[str, Any], professional: str) -> int:
 
 
 # ======================================================
-# SUMMARY MENSUAL (Secretaría / Paciente)
+# SUMMARY POR RANGO (NUEVO — AGENDA FUTURA REAL)
+# ======================================================
+
+def range_summary(
+    *,
+    professional: str,
+    start_date: str,
+    days: int
+) -> Dict[str, Any]:
+    """
+    Devuelve estado por día desde start_date hacia adelante.
+
+    start_date: "YYYY-MM-DD"
+    days: número de días a devolver (ej: 7 o 30)
+    """
+    start = date.fromisoformat(start_date)
+
+    result_days: Dict[str, str] = {}
+
+    for i in range(days):
+        current = start + timedelta(days=i)
+        iso = current.isoformat()
+
+        day_data = store.read_day(iso)
+        free_slots = _count_free_slots(day_data, professional)
+
+        if free_slots == -1:
+            status = "empty"
+        else:
+            status = _day_status(free_slots)
+
+        result_days[iso] = status
+
+    return {
+        "start_date": start_date,
+        "professional": professional,
+        "days": result_days
+    }
+
+
+# ======================================================
+# SUMMARY MENSUAL (LEGACY — Secretaría / Paciente)
 # ======================================================
 
 def month_summary(*, professional: str, month: str) -> Dict[str, Any]:
     """
-    Devuelve estado por día del mes.
+    Devuelve estado por día del mes calendario.
 
     month: "2026-01"
     """
@@ -79,7 +120,7 @@ def month_summary(*, professional: str, month: str) -> Dict[str, Any]:
     # Primer día del mes
     current = date(year, mm, 1)
 
-    # Último día (aprox)
+    # Último día
     if mm == 12:
         next_month = date(year + 1, 1, 1)
     else:
@@ -109,14 +150,14 @@ def month_summary(*, professional: str, month: str) -> Dict[str, Any]:
 
 
 # ======================================================
-# SUMMARY SEMANAL (Médico)
+# SUMMARY SEMANAL (LEGACY — Médico)
 # ======================================================
 
 def week_summary(*, professional: str, week_start: str) -> Dict[str, Any]:
     """
-    Devuelve agenda resumida por semana.
+    Devuelve agenda resumida por semana calendario.
 
-    week_start: "2026-01-26" (lunes)
+    week_start: "YYYY-MM-DD" (lunes)
     """
     start = date.fromisoformat(week_start)
 
@@ -131,7 +172,7 @@ def week_summary(*, professional: str, week_start: str) -> Dict[str, Any]:
 
         slots = prof.get("slots", {})
 
-        # Solo devolvemos status por hora
+        # Estado por hora
         day_slots = {
             time: slot.get("status", "available")
             for time, slot in slots.items()
