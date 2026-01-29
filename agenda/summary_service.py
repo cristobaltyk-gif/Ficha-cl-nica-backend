@@ -1,22 +1,27 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 from typing import Dict, Any
+import json
+from pathlib import Path
 
 from agenda import store
 
 # ======================================================
-# CANÓNICO ICA — SUMMARY ENGINE
+# CANÓNICO ICA — SUMMARY ENGINE (PRODUCCIÓN)
 # ------------------------------------------------------
-# ✔ Calcula disponibilidad mensual, semanal y por rango
+# ✔ Usa horario REAL del profesional
+# ✔ Un día sin slots = DISPONIBLE si el médico trabaja
+# ✔ Soporta rangos (7 / 30 días)
 # ✔ NO muta agenda
-# ✔ SOLO lectura de agenda_future.json
-# ✔ Compatible con router legacy + start_date
+# ✔ NO inventa datos
 # ======================================================
 
 # =============================
-# Reglas de estado (OFICIAL)
+# Configuración
 # =============================
+
+PROFESSIONALS_PATH = Path("data/professionals.json")
 
 FREE_THRESHOLD = 10   # ≥10 slots libres → green
 LOW_THRESHOLD = 1     # 1–9 slots libres → yellow
@@ -24,13 +29,25 @@ FULL_THRESHOLD = 0    # 0 slots libres → red
 
 
 # =============================
-# Helpers internos
+# Cargar profesionales (horario)
+# =============================
+
+def _load_professionals() -> Dict[str, Any]:
+    if not PROFESSIONALS_PATH.exists():
+        return {}
+
+    with open(PROFESSIONALS_PATH, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+PROFESSIONALS = _load_professionals()
+
+
+# =============================
+# Helpers de estado
 # =============================
 
 def _day_status(free_slots: int) -> str:
-    """
-    Traduce número de slots libres a estado canónico.
-    """
     if free_slots >= FREE_THRESHOLD:
         return "free"
     if free_slots >= LOW_THRESHOLD:
@@ -40,30 +57,67 @@ def _day_status(free_slots: int) -> str:
     return "empty"
 
 
-def _count_free_slots(day_data: Dict[str, Any], professional: str) -> int:
-    """
-    Cuenta slots disponibles para un profesional en un día.
-    """
-    prof = day_data.get(professional)
+def _weekday_name(d: date) -> str:
+    # monday, tuesday, ...
+    return d.strftime("%A").lower()
 
-    # Día sin agenda definida
-    if not prof:
+
+def _build_slots_for_day(schedule: Dict[str, Any]) -> int:
+    """
+    Calcula TOTAL de slots posibles en el día
+    soporta múltiples bloques (mañana / tarde)
+    """
+    total = 0
+    slot_minutes = schedule.get("slotMinutes", 30)
+
+    for block in schedule.get("blocks", []):
+        start = datetime.strptime(block["start"], "%H:%M")
+        end = datetime.strptime(block["end"], "%H:%M")
+        minutes = int((end - start).total_seconds() / 60)
+        total += minutes // slot_minutes
+
+    return total
+
+
+# =============================
+# Conteo REAL de slots libres
+# =============================
+
+def _count_free_slots(day_data: Dict[str, Any], professional: str, current_date: date) -> int:
+    """
+    Devuelve cantidad de slots libres para ese día.
+    - Si el médico NO trabaja ese día → -1 (empty)
+    - Si trabaja y no hay slots → todos libres
+    """
+
+    prof_cfg = PROFESSIONALS.get(professional)
+    if not prof_cfg or not prof_cfg.get("active"):
         return -1
 
-    slots = prof.get("slots", {})
+    schedule = prof_cfg.get("schedule")
+    if not schedule:
+        return -1
 
-    # Total de slots ocupados
+    weekday = _weekday_name(current_date)
+    day_schedule = schedule.get("days", {}).get(weekday)
+
+    # No atiende ese día
+    if not day_schedule:
+        return -1
+
+    total_slots = _build_slots_for_day(day_schedule)
+
+    # Slots ocupados reales
+    prof_day = day_data.get(professional, {})
+    slots = prof_day.get("slots", {})
     busy = len(slots)
 
-    # Total de slots posibles (09:00–18:00 cada 15 min)
-    total = 36  # 9 horas * 4 slots/hora
-
-    free = total - busy
-    return free
+    free = total_slots - busy
+    return max(free, 0)
 
 
 # ======================================================
-# SUMMARY POR RANGO (NUEVO — AGENDA FUTURA REAL)
+# SUMMARY POR RANGO (7 / 30 días)
 # ======================================================
 
 def range_summary(
@@ -72,12 +126,6 @@ def range_summary(
     start_date: str,
     days: int
 ) -> Dict[str, Any]:
-    """
-    Devuelve estado por día desde start_date hacia adelante.
-
-    start_date: "YYYY-MM-DD"
-    days: número de días a devolver (ej: 7 o 30)
-    """
     start = date.fromisoformat(start_date)
 
     result_days: Dict[str, str] = {}
@@ -87,7 +135,7 @@ def range_summary(
         iso = current.isoformat()
 
         day_data = store.read_day(iso)
-        free_slots = _count_free_slots(day_data, professional)
+        free_slots = _count_free_slots(day_data, professional, current)
 
         if free_slots == -1:
             status = "empty"
@@ -104,84 +152,27 @@ def range_summary(
 
 
 # ======================================================
-# SUMMARY MENSUAL (LEGACY — Secretaría / Paciente)
+# LEGACY (no se rompe nada)
 # ======================================================
 
 def month_summary(*, professional: str, month: str) -> Dict[str, Any]:
-    """
-    Devuelve estado por día del mes calendario.
-
-    month: "2026-01"
-    """
     year, mm = month.split("-")
     year = int(year)
     mm = int(mm)
 
-    # Primer día del mes
-    current = date(year, mm, 1)
+    start = date(year, mm, 1)
+    days_in_month = (date(year + (mm == 12), (mm % 12) + 1, 1) - start).days
 
-    # Último día
-    if mm == 12:
-        next_month = date(year + 1, 1, 1)
-    else:
-        next_month = date(year, mm + 1, 1)
+    return range_summary(
+        professional=professional,
+        start_date=start.isoformat(),
+        days=days_in_month
+    )
 
-    days: Dict[str, str] = {}
-
-    while current < next_month:
-        iso = current.isoformat()
-
-        day_data = store.read_day(iso)
-        free_slots = _count_free_slots(day_data, professional)
-
-        if free_slots == -1:
-            status = "empty"
-        else:
-            status = _day_status(free_slots)
-
-        days[iso] = status
-        current += timedelta(days=1)
-
-    return {
-        "month": month,
-        "professional": professional,
-        "days": days
-    }
-
-
-# ======================================================
-# SUMMARY SEMANAL (LEGACY — Médico)
-# ======================================================
 
 def week_summary(*, professional: str, week_start: str) -> Dict[str, Any]:
-    """
-    Devuelve agenda resumida por semana calendario.
-
-    week_start: "YYYY-MM-DD" (lunes)
-    """
-    start = date.fromisoformat(week_start)
-
-    week: Dict[str, Dict[str, str]] = {}
-
-    for i in range(7):
-        current = start + timedelta(days=i)
-        iso = current.isoformat()
-
-        day_data = store.read_day(iso)
-        prof = day_data.get(professional, {})
-
-        slots = prof.get("slots", {})
-
-        # Estado por hora
-        day_slots = {
-            time: slot.get("status", "available")
-            for time, slot in slots.items()
-        }
-
-        week[iso] = day_slots
-
-    return {
-        "week_start": week_start,
-        "professional": professional,
-        "days": week
-    }
+    return range_summary(
+        professional=professional,
+        start_date=week_start,
+        days=7
+    )
