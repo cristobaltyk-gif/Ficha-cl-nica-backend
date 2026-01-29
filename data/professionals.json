@@ -1,56 +1,40 @@
 {
-  "doc1": {
-    "id": "doc1",
+  "huerta": {
+    "id": "huerta",
     "name": "Dr. Cristóbal Huerta",
     "specialty": "Cadera",
     "active": true,
     "schedule": {
-      "slotMinutes": 30,
-
-      /* LEGACY (no romper contratos existentes) */
+      "slotMinutes": 15,
       "start": "09:00",
-      "end": "13:00",
-
-      /* NUEVO CANÓNICO */
+      "end": "12:00",
       "days": {
         "monday": [
-          { "start": "09:00", "end": "13:00" }
-        ],
-        
-        "wednesday": [
-          { "start": "09:00", "end": "13:00" }
+          { "start": "09:00", "end": "12:00" }
         ],
         "thursday": [
-          { "start": "09:00", "end": "13:00" }
+          { "start": "09:00", "end": "12:00" }
         ],
-      
+        "friday": [
+          { "start": "09:00", "end": "12:00" }
+        ]
       }
     }
   },
 
-  "doc2": {
-    "id": "doc2",
+  "espinoza": {
+    "id": "espinoza",
     "name": "Dr. Jaime Espinoza",
     "specialty": "Rodilla",
     "active": true,
     "schedule": {
-      "slotMinutes": 30,
-
-      /* LEGACY */
-      "start": "14:00",
-      "end": "18:00",
-
-      /* NUEVO CANÓNICO — MAÑANA + TARDE */
+      "slotMinutes": 15,
+      "start": "10:00",
+      "end": "19:00",
       "days": {
         "monday": [
-          { "start": "09:00", "end": "12:00" },
-          { "start": "14:00", "end": "18:00" }
-        ],
-        "wednesday": [
-          { "start": "14:00", "end": "18:00" }
-        ],
-        "friday": [
-          { "start": "09:00", "end": "12:00" }
+          { "start": "10:00", "end": "13:00" },
+          { "start": "15:00", "end": "19:00" }
         ]
       }
     }
