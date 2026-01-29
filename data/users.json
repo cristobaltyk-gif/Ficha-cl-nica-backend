@@ -1,46 +1,58 @@
 {
-  "doc1": {
-    "id": "doc1",
-    "name": "Dr. Cristóbal Huerta",
-    "specialty": "Cadera",
+  "admin": {
+    "password": "admin123",
     "active": true,
-    "schedule": {
-      "slotMinutes": 15,
-      "days": {
-        "monday": {
-          "blocks": [
-            { "start": "09:00", "end": "12:00" }
-          ]
-        },
-        "thursday": {
-          "blocks": [
-            { "start": "09:00", "end": "12:00" }
-          ]
-        },
-        "friday": {
-          "blocks": [
-            { "start": "09:00", "end": "12:00" }
-          ]
-        }
-      }
+    "role": {
+      "name": "admin",
+      "entry": "/administracion",
+      "allow": [
+        "agenda",
+        "pacientes",
+        "atencion",
+        "documentos",
+        "administracion"
+      ]
     }
   },
 
-  "doc2": {
-    "id": "doc2",
-    "name": "Dr. Jaime Espinoza",
-    "specialty": "Rodilla",
+  "secretaria1": {
+    "password": "secre123",
     "active": true,
-    "schedule": {
-      "slotMinutes": 15,
-      "days": {
-        "monday": {
-          "blocks": [
-            { "start": "10:00", "end": "13:00" },
-            { "start": "15:00", "end": "19:00" }
-          ]
-        }
-      }
+    "role": {
+      "name": "secretaria",
+      "entry": "/secretaria",
+      "allow": [
+        "agenda",
+        "pacientes"
+      ]
+    }
+  },
+
+  "medico1": {
+    "password": "medico123",
+    "active": true,
+    "role": {
+      "name": "medico",
+      "entry": "/medico",
+      "allow": [
+        "agenda",
+        "pacientes",
+        "atencion",
+        "documentos"
+      ]
+    }
+  },
+
+  "kine1": {
+    "password": "kine123",
+    "active": true,
+    "role": {
+      "name": "kinesiologia",
+      "entry": "/kine",
+      "allow": [
+        "agenda",
+        "pacientes"
+      ]
     }
   }
 }
