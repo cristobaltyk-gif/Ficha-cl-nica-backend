@@ -1,25 +1,31 @@
 from __future__ import annotations
 
-from datetime import datetime, date, time, timezone
+from datetime import datetime, date, time
 from typing import Tuple
+from zoneinfo import ZoneInfo
+
+
+# -----------------------------
+# Zona horaria clínica (CHILE)
+# -----------------------------
+CLINIC_TZ = ZoneInfo("America/Santiago")
 
 
 # -----------------------------
 # Tiempo "oficial" backend
 # -----------------------------
-def now_utc() -> datetime:
-    return datetime.now(timezone.utc)
+def now_local() -> datetime:
+    return datetime.now(CLINIC_TZ)
 
 
-def today_utc() -> date:
-    return now_utc().date()
+def today_local() -> date:
+    return now_local().date()
 
 
 # -----------------------------
 # Parsers estrictos
 # -----------------------------
 def parse_yyyy_mm_dd(d: str) -> date:
-    # espera "YYYY-MM-DD"
     try:
         return datetime.strptime(d, "%Y-%m-%d").date()
     except Exception:
@@ -27,7 +33,6 @@ def parse_yyyy_mm_dd(d: str) -> date:
 
 
 def parse_hh_mm(t: str) -> time:
-    # espera "HH:MM" 24h
     try:
         return datetime.strptime(t, "%H:%M").time()
     except Exception:
@@ -51,9 +56,14 @@ def is_future_slot(slot_date: str, slot_time: str) -> bool:
     d = parse_yyyy_mm_dd(slot_date)
     t = parse_hh_mm(slot_time)
 
-    now = now_utc()
-    # Comparamos usando UTC (simple y consistente)
-    slot_dt = datetime(d.year, d.month, d.day, t.hour, t.minute, tzinfo=timezone.utc)
+    now = now_local()
+
+    slot_dt = datetime(
+        d.year, d.month, d.day,
+        t.hour, t.minute,
+        tzinfo=CLINIC_TZ
+    )
+
     return slot_dt >= now
 
 
@@ -64,11 +74,9 @@ def assert_future_slot(slot_date: str, slot_time: str) -> None:
 
 # -----------------------------
 # Normalización RUT (mínima)
-# NO valida dígito verificador aquí (eso puede ir en ficha clínica)
 # -----------------------------
 def normalize_rut(rut: str) -> str:
     r = rut.strip().upper().replace(" ", "")
-    # mantener puntos y guión tal cual si vienen; solo limpieza mínima
     return r
 
 
@@ -76,10 +84,6 @@ def normalize_rut(rut: str) -> str:
 # Helpers para rangos de horario
 # -----------------------------
 def build_time_range(start_hhmm: str, end_hhmm: str, interval: int) -> list[str]:
-    """
-    Genera lista de HH:MM desde start inclusive hasta end exclusiva,
-    avanzando en interval minutos.
-    """
     if interval <= 0:
         raise ValueError("interval debe ser > 0")
 
