@@ -4,7 +4,6 @@ from datetime import datetime, date, time
 from typing import Tuple
 from zoneinfo import ZoneInfo
 
-
 # -----------------------------
 # Zona horaria clínica (CHILE)
 # -----------------------------
@@ -13,13 +12,16 @@ CLINIC_TZ = ZoneInfo("America/Santiago")
 
 # -----------------------------
 # Tiempo "oficial" backend
+# ⚠️ NO CAMBIAR NOMBRES (CONTRATO)
 # -----------------------------
-def now_local() -> datetime:
+def now_utc() -> datetime:
+    # Hora real Chile (aware)
     return datetime.now(CLINIC_TZ)
 
 
-def today_local() -> date:
-    return now_local().date()
+def today_utc() -> date:
+    # Fecha real Chile
+    return now_utc().date()
 
 
 # -----------------------------
@@ -50,17 +52,20 @@ def is_on_interval(hhmm: str, interval: int) -> bool:
 
 # -----------------------------
 # Reglas temporales de agenda
-# Agenda = SOLO futuro (y hoy hacia adelante)
+# Agenda = SOLO futuro (hoy incluido)
 # -----------------------------
 def is_future_slot(slot_date: str, slot_time: str) -> bool:
     d = parse_yyyy_mm_dd(slot_date)
     t = parse_hh_mm(slot_time)
 
-    now = now_local()
+    now = now_utc()
 
     slot_dt = datetime(
-        d.year, d.month, d.day,
-        t.hour, t.minute,
+        d.year,
+        d.month,
+        d.day,
+        t.hour,
+        t.minute,
         tzinfo=CLINIC_TZ
     )
 
@@ -76,8 +81,7 @@ def assert_future_slot(slot_date: str, slot_time: str) -> None:
 # Normalización RUT (mínima)
 # -----------------------------
 def normalize_rut(rut: str) -> str:
-    r = rut.strip().upper().replace(" ", "")
-    return r
+    return rut.strip().upper().replace(" ", "")
 
 
 # -----------------------------
@@ -103,4 +107,5 @@ def build_time_range(start_hhmm: str, end_hhmm: str, interval: int) -> list[str]
         mm = str(cur % 60).zfill(2)
         out.append(f"{hh}:{mm}")
         cur += interval
+
     return out
