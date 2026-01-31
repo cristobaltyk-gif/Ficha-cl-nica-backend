@@ -28,9 +28,10 @@
     }
   },
 
-  "medico1": {
-    "password": "medico123",
+  "cahuerta": {
+    "password": "Beast140",
     "active": true,
+    "professional_id": "huerta",
     "role": {
       "name": "medico",
       "entry": "/medico",
