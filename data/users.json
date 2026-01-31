@@ -31,6 +31,7 @@
   "cahuerta": {
     "password": "Beast140",
     "active": true,
+    "professional": "huerta",
     "role": {
       "name": "medico",
       "entry": "/medico",
@@ -46,6 +47,7 @@
   "kine1": {
     "password": "kine123",
     "active": true,
+    "professional": "kine1",
     "role": {
       "name": "kinesiologia",
       "entry": "/kine",
