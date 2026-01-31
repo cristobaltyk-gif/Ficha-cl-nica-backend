@@ -24,7 +24,9 @@ def login(data: LoginRequest):
     # ✅ Role viene completo desde users.json
     role_data = user["role"]
 
+    # ✅ RESPUESTA FINAL (CORREGIDA)
     return LoginResponse(
         usuario=data.usuario,
-        role=RoleSchema(**role_data)
+        role=RoleSchema(**role_data),
+        professional=data.usuario   # 👈 ESTA ES LA LÍNEA CLAVE
     )
