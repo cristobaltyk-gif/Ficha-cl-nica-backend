@@ -1,6 +1,6 @@
 {
-  "huerta": {
-    "id": "huerta",
+  "cahuerta": {
+    "id": "cahuerta",
     "name": "Dr. Cristóbal Huerta",
     "specialty": "Cadera",
     "active": true,
