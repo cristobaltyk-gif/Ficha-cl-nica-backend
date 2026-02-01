@@ -2,6 +2,7 @@
   "admin": {
     "password": "admin123",
     "active": true,
+    "professional": "system",
     "role": {
       "name": "admin",
       "entry": "/administracion",
@@ -18,6 +19,7 @@
   "secretaria1": {
     "password": "secre123",
     "active": true,
+    "professional": "system",
     "role": {
       "name": "secretaria",
       "entry": "/secretaria",
