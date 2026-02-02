@@ -13,6 +13,7 @@ from core.professionals_router import router as professionals_router  # 👨‍�
 from agenda.router import router as agenda_router  # 📅 Agenda diaria
 from agenda.summary_router import router as agenda_summary_router  # 📅 Resumen mensual/semanal
 from agenda.professionals_router import router as professionals_admin_router
+from modules.fichas.ficha_administrativa import router as ficha_admin_router
 
 # ==========================
 # APP CORE
@@ -57,6 +58,9 @@ app.include_router(agenda_router)
 app.include_router(agenda_summary_router)
 
 app.include_router(professionals_admin_router)
+
+app.include_router(ficha_admin_router)
+
 # ==========================
 # HEALTHCHECK
 # ==========================
