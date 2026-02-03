@@ -7,8 +7,6 @@ from datetime import datetime, timezone
 from typing import Dict, Any
 
 from fastapi import APIRouter, HTTPException, Depends
-
-# 🔐 AUTH INTERNO (SEPARADO DEL LOGIN)
 from auth.internal_auth import require_internal_auth
 
 # ==================================================
@@ -45,11 +43,13 @@ def update_ficha_administrativa(
     auth=Depends(require_internal_auth)
 ):
     """
-    ACTUALIZA ficha administrativa existente.
+    ACTUALIZA ficha administrativa existente
+    SOLO con los campos del formulario.
     ❌ No crea
     ❌ No busca
     ❌ No lista
     """
+
     file = admin_file(rut)
 
     if not file.exists():
@@ -61,16 +61,15 @@ def update_ficha_administrativa(
     with LOCK:
         ficha = json.loads(file.read_text(encoding="utf-8"))
 
-        # Campos permitidos a modificar
+        # 🔒 CAMPOS PERMITIDOS (CONTRATO FORMULARIO)
         for field in [
             "nombre",
             "apellido_paterno",
             "apellido_materno",
             "fecha_nacimiento",
-            "sexo",
+            "direccion",
             "telefono",
             "email",
-            "direccion",
             "prevision"
         ]:
             if field in data:
