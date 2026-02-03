@@ -7,7 +7,7 @@ from typing import Dict, Any, List
 from fastapi import APIRouter, HTTPException, Query, Depends
 from auth.internal_auth import require_internal_auth
 
-BASE_DATA_PATH = Path("data/pacientes")
+BASE_DATA_PATH = Path("/data/pacientes")
 
 router = APIRouter(
     prefix="/api/fichas/admin",
