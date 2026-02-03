@@ -42,21 +42,26 @@ def admin_file(rut: str) -> Path:
 @router.post("")
 def create_ficha_administrativa(data: Dict[str, Any]):
     """
-    CREA ficha administrativa EXACTAMENTE
-    con los mismos campos del frontend.
+    CREA ficha administrativa
+    EXACTAMENTE con el contrato del frontend.
     """
 
     # ---------------------------
-    # VALIDACIÓN DURA
+    # VALIDACIÓN DURA (CONTRATO)
     # ---------------------------
-    required = ["rut", "nombre", "apellido_paterno", "edad"]
+    required = [
+        "rut",
+        "nombre",
+        "apellido_paterno",
+        "fecha_nacimiento"
+    ]
 
     for field in required:
-        if field not in data:
-            raise HTTPException(400, f"Campo obligatorio faltante: {field}")
-
-    if not isinstance(data["edad"], int):
-        raise HTTPException(400, "edad debe ser un número entero")
+        if field not in data or not data[field]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Campo obligatorio faltante: {field}"
+            )
 
     rut = data["rut"]
 
@@ -72,17 +77,20 @@ def create_ficha_administrativa(data: Dict[str, Any]):
         file = admin_file(rut)
 
         if file.exists():
-            raise HTTPException(409, "Ficha administrativa ya existe")
+            raise HTTPException(
+                status_code=409,
+                detail="Ficha administrativa ya existe"
+            )
 
         # ---------------------------
-        # FICHA CANÓNICA (CONTRATO)
+        # FICHA ADMINISTRATIVA (CONTRATO ÚNICO)
         # ---------------------------
         ficha = {
             "rut": rut,
             "nombre": data["nombre"],
-            "apellido_paterno": data.get("apellido_paterno", ""),
+            "apellido_paterno": data["apellido_paterno"],
             "apellido_materno": data.get("apellido_materno", ""),
-            "edad": data["edad"],
+            "fecha_nacimiento": data["fecha_nacimiento"],
             "direccion": data.get("direccion", ""),
             "telefono": data.get("telefono", ""),
             "email": data.get("email", ""),
