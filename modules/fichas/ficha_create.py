@@ -13,7 +13,7 @@ from auth.internal_auth import require_internal_auth
 # CONFIG
 # ===============================
 
-BASE_DATA_PATH = Path("data/pacientes")
+BASE_DATA_PATH = Path("/data/pacientes")
 LOCK = Lock()
 
 router = APIRouter(
