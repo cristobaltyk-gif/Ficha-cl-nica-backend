@@ -16,6 +16,7 @@ from agenda.professionals_router import router as professionals_admin_router
 from modules.fichas.ficha_create import router as ficha_create_router
 from modules.fichas.ficha_read import router as ficha_read_router
 from modules.fichas.ficha_update import router as ficha_update_router
+from modules.gpt.gpt_clinical import router as gpt_clinical_router
 
 
 # ==========================
@@ -65,6 +66,9 @@ app.include_router(professionals_admin_router)
 app.include_router(ficha_create_router)
 app.include_router(ficha_read_router)
 app.include_router(ficha_update_router)
+
+# 🤖 GPT clínico
+app.include_router(gpt_clinical_router)
 
 # ==========================
 # HEALTHCHECK
