@@ -35,3 +35,8 @@ psycopg2-binary
 # Testing básico
 # =========================
 pytest
+
+# =========================
+# OpenAI (GPT clínico)
+# =========================
+openai>=1.0.0
