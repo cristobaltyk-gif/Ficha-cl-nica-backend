@@ -7,11 +7,10 @@ from datetime import datetime, timezone
 from typing import Dict, Any
 
 # =============================
-# Configuración
+# Configuración (RENDER DISK)
 # =============================
-DATA_PATH = Path("data/agenda_future.json")
+DATA_PATH = Path("/data/agenda_future.json")
 LOCK = Lock()
-
 
 # =============================
 # Helpers
@@ -29,12 +28,19 @@ def _ensure_base(store: Dict[str, Any]) -> None:
     store["meta"]["updated_at"] = _utc_iso()
 
 
-def _ensure_day_professional(store: Dict[str, Any], date: str, professional: str) -> None:
+def _ensure_day_professional(
+    store: Dict[str, Any],
+    date: str,
+    professional: str
+) -> None:
     store["calendar"].setdefault(date, {})
-    store["calendar"][date].setdefault(professional, {
-        "schedule": {},
-        "slots": {}
-    })
+    store["calendar"][date].setdefault(
+        professional,
+        {
+            "schedule": {},
+            "slots": {}
+        }
+    )
 
     store["index_by_time"].setdefault(date, {})
 
@@ -45,8 +51,7 @@ def _ensure_day_professional(store: Dict[str, Any], date: str, professional: str
 # =============================
 def load_store() -> Dict[str, Any]:
     """
-    Lee el JSON completo.
-    NO usa lock interno.
+    Lee el JSON completo desde disco persistente.
     """
     if not DATA_PATH.exists():
         DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -72,8 +77,7 @@ def load_store() -> Dict[str, Any]:
 
 def save_store(store: Dict[str, Any]) -> None:
     """
-    Escribe el JSON completo.
-    NO usa lock interno.
+    Escribe el JSON completo en disco persistente.
     """
     _ensure_base(store)
 
