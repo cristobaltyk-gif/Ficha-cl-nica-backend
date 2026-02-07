@@ -24,6 +24,20 @@ class ClinicalOrderResponse(BaseModel):
 
 
 # =========================
+# HELPERS
+# =========================
+
+def _safe_str(value) -> str:
+    """
+    Asegura string limpio para frontend.
+    None, listas o valores raros -> ""
+    """
+    if isinstance(value, str):
+        return value.strip()
+    return ""
+
+
+# =========================
 # ENDPOINT
 # =========================
 
@@ -33,13 +47,16 @@ class ClinicalOrderResponse(BaseModel):
 )
 def clinical_order(data: ClinicalOrderRequest):
 
-    if not data.text.strip():
-        raise HTTPException(status_code=400, detail="Texto vacío")
+    if not data.text or not data.text.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Texto vacío"
+        )
 
     prompt = f"""
 Eres un médico traumatólogo especialista.
 
-Tu tarea es ordenar el texto clínico dictado durante una consulta médica.
+Tu tarea es ordenar el texto clínico dictado durante una consulta médica real.
 
 REGLAS ESTRICTAS:
 - NO inventes información.
@@ -54,8 +71,9 @@ REGLAS ESTRICTAS:
 - Devuelve SOLO un JSON válido.
 - NO uses markdown.
 - NO agregues explicaciones.
+- NO agregues texto fuera del JSON.
 
-Devuelve EXACTAMENTE este formato:
+FORMATO DE SALIDA OBLIGATORIO (JSON EXACTO):
 
 {{
   "atencion": "",
@@ -81,8 +99,7 @@ TEXTO CLÍNICO:
                     "role": "system",
                     "content": (
                         "Eres un asistente médico clínico. "
-                        "Respondes exclusivamente con JSON válido, "
-                        "sin texto adicional."
+                        "Respondes exclusivamente con JSON válido."
                     )
                 },
                 {
@@ -95,15 +112,29 @@ TEXTO CLÍNICO:
 
         content = response.choices[0].message.content.strip()
 
+        # =========================
+        # PARSEO ESTRICTO
+        # =========================
         try:
             parsed = json.loads(content)
         except json.JSONDecodeError:
             raise HTTPException(
                 status_code=500,
-                detail=f"GPT devolvió JSON inválido: {content}"
+                detail="GPT devolvió JSON inválido. Complete la ficha manualmente."
             )
 
-        return ClinicalOrderResponse(**parsed)
+        # =========================
+        # NORMALIZACIÓN (CONTRATO)
+        # =========================
+        return ClinicalOrderResponse(
+            atencion=_safe_str(parsed.get("atencion")),
+            diagnostico=_safe_str(parsed.get("diagnostico")),
+            receta=_safe_str(parsed.get("receta")),
+            examenes=_safe_str(parsed.get("examenes")),
+            ordenKinesica=_safe_str(parsed.get("ordenKinesica")),
+            indicaciones=_safe_str(parsed.get("indicaciones")),
+            indicacionQuirurgica=_safe_str(parsed.get("indicacionQuirurgica")),
+        )
 
     except HTTPException:
         raise
