@@ -29,8 +29,9 @@ class ClinicalOrderResponse(BaseModel):
 
 def _safe_str(value) -> str:
     """
-    Asegura string limpio para frontend.
-    None, listas o valores raros -> ""
+    Normaliza cualquier valor a string seguro para el frontend.
+    - None / listas / valores raros → ""
+    - string → strip()
     """
     if isinstance(value, str):
         return value.strip()
