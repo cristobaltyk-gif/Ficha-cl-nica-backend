@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from core.openai_client import client
 import json
+import traceback
 
 router = APIRouter(prefix="/api/gpt", tags=["GPT Clínico"])
 
@@ -30,8 +31,6 @@ class ClinicalOrderResponse(BaseModel):
 def _safe_str(value) -> str:
     """
     Normaliza cualquier valor a string seguro para el frontend.
-    - None / listas / valores raros → ""
-    - string → strip()
     """
     if isinstance(value, str):
         return value.strip()
@@ -48,11 +47,17 @@ def _safe_str(value) -> str:
 )
 def clinical_order(data: ClinicalOrderRequest):
 
+    print(">>> [GPT] ENDPOINT /clinical-order ENTRÓ")
+
     if not data.text or not data.text.strip():
+        print(">>> [GPT] TEXTO VACÍO")
         raise HTTPException(
             status_code=400,
             detail="Texto vacío"
         )
+
+    print(">>> [GPT] TEXTO RECIBIDO:")
+    print(data.text)
 
     prompt = f"""
 Eres un médico traumatólogo especialista.
@@ -93,6 +98,8 @@ TEXTO CLÍNICO:
 """
 
     try:
+        print(">>> [GPT] LLAMANDO A OPENAI…")
+
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
@@ -111,18 +118,27 @@ TEXTO CLÍNICO:
             temperature=0.2
         )
 
-        content = response.choices[0].message.content.strip()
+        print(">>> [GPT] RESPUESTA OPENAI RECIBIDA")
+
+        content = response.choices[0].message.content
+        print(">>> [GPT] CONTENIDO CRUDO:")
+        print(content)
 
         # =========================
         # PARSEO ESTRICTO
         # =========================
         try:
             parsed = json.loads(content)
+            print(">>> [GPT] JSON PARSEADO OK")
         except json.JSONDecodeError:
+            print(">>> [GPT] ERROR JSON INVÁLIDO")
             raise HTTPException(
                 status_code=500,
                 detail="GPT devolvió JSON inválido. Complete la ficha manualmente."
             )
+
+        print(">>> [GPT] JSON FINAL ENTREGADO AL FRONT:")
+        print(parsed)
 
         # =========================
         # NORMALIZACIÓN (CONTRATO)
@@ -141,6 +157,8 @@ TEXTO CLÍNICO:
         raise
 
     except Exception as e:
+        print(">>> [GPT] EXCEPCIÓN NO CONTROLADA")
+        traceback.print_exc()
         raise HTTPException(
             status_code=500,
             detail=f"Error GPT: {str(e)}"
