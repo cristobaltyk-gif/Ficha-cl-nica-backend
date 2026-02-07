@@ -12,6 +12,7 @@ router = APIRouter(prefix="/api/gpt", tags=["GPT Clínico"])
 class ClinicalOrderRequest(BaseModel):
     text: str
 
+
 class ClinicalOrderResponse(BaseModel):
     atencion: str
     diagnostico: str
@@ -20,6 +21,7 @@ class ClinicalOrderResponse(BaseModel):
     ordenKinesica: str
     indicaciones: str
     indicacionQuirurgica: str
+
 
 # =========================
 # ENDPOINT
@@ -44,7 +46,11 @@ REGLAS ESTRICTAS:
 - NO agregues conclusiones no mencionadas.
 - Usa español médico formal.
 - Corrige gramática y coherencia.
-- Si un campo no está presente, déjalo vacío.
+- Si la información clínica está explícitamente mencionada en el texto,
+  aunque no esté rotulada como sección,
+  ordénala en el campo correspondiente.
+- Si un campo NO está mencionado de ninguna forma en el texto,
+  déjalo vacío.
 - Devuelve SOLO un JSON válido.
 - NO uses markdown.
 - NO agregues explicaciones.
@@ -73,7 +79,11 @@ TEXTO CLÍNICO:
             messages=[
                 {
                     "role": "system",
-                    "content": "Eres un asistente médico clínico. Respondes solo JSON válido."
+                    "content": (
+                        "Eres un asistente médico clínico. "
+                        "Respondes exclusivamente con JSON válido, "
+                        "sin texto adicional."
+                    )
                 },
                 {
                     "role": "user",
@@ -90,7 +100,7 @@ TEXTO CLÍNICO:
         except json.JSONDecodeError:
             raise HTTPException(
                 status_code=500,
-                detail="GPT devolvió JSON inválido"
+                detail=f"GPT devolvió JSON inválido: {content}"
             )
 
         return ClinicalOrderResponse(**parsed)
