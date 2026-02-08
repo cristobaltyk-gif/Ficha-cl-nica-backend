@@ -59,25 +59,48 @@ def clinical_order(data: ClinicalOrderRequest):
     print(">>> [GPT] TEXTO RECIBIDO:")
     print(data.text)
 
+    # =========================
+    # PROMPT CLÍNICO RÍGIDO
+    # =========================
     prompt = f"""
 Eres un médico traumatólogo especialista.
 
-Tu tarea es ordenar el texto clínico dictado durante una consulta médica real.
+Tu tarea es TRANSFORMAR el texto clínico dictado o escrito durante una consulta
+en una ficha clínica formal, objetiva y profesional.
 
-REGLAS ESTRICTAS:
+REGLAS ABSOLUTAS:
+- NO saludes.
+- NO dialogues.
 - NO inventes información.
-- NO agregues conclusiones no mencionadas.
+- NO agregues antecedentes no mencionados.
+- NO agregues conclusiones propias.
 - Usa español médico formal.
 - Corrige gramática y coherencia.
-- Si la información clínica está explícitamente mencionada en el texto,
-  aunque no esté rotulada como sección,
-  ordénala en el campo correspondiente.
-- Si un campo NO está mencionado de ninguna forma en el texto,
-  déjalo vacío.
+- Si una información está claramente mencionada, asígnala al campo correcto,
+  aunque no esté rotulada.
+- Si un campo NO está mencionado de ninguna forma, déjalo vacío.
 - Devuelve SOLO un JSON válido.
-- NO uses markdown.
-- NO agregues explicaciones.
-- NO agregues texto fuera del JSON.
+- NO markdown.
+- NO explicaciones.
+- NO texto fuera del JSON.
+
+ESTRUCTURA OBLIGATORIA:
+
+ATENCION:
+Debe redactarse como texto clínico formal, usando este esquema SOLO si corresponde:
+- Edad del paciente (si está mencionada).
+- Antecedentes mórbidos relevantes (si están mencionados).
+- Refiere: relato del paciente.
+- Examen físico: hallazgos objetivos del médico.
+
+DIAGNOSTICO:
+- Debe reflejar el juicio clínico del médico.
+- Incluir lateralidad (derecha / izquierda) si corresponde.
+- NO repetir síntomas.
+
+EXAMENES:
+- Deben ser coherentes con la historia clínica.
+- Incluir región anatómica y lateralidad si corresponde.
 
 FORMATO DE SALIDA OBLIGATORIO (JSON EXACTO):
 
