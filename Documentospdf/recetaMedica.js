@@ -1,10 +1,8 @@
-// recetaMedica.js
-import PDFDocument from "pdfkit";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { getProfessionalData } from "./professionalResolver.js";
 
-// __dirname para ES Modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -14,9 +12,16 @@ export function generarRecetaMedica(doc, datos) {
     edad,
     rut,
     diagnostico,
-    medicamentos, // ← ARRAY [{ nombre, dosis, frecuencia, duracion }]
+    medicamentos,
     indicaciones,
+    professional // ← viene del login
   } = datos || {};
+
+  const medico = getProfessionalData(professional);
+
+  if (!medico) {
+    throw new Error("Profesional no encontrado");
+  }
 
   /* ================= ENCABEZADO ================= */
   try {
@@ -27,14 +32,11 @@ export function generarRecetaMedica(doc, datos) {
   } catch {}
 
   doc.moveDown(1.5);
-  doc
-    .font("Helvetica-Bold")
-    .fontSize(18)
+  doc.font("Helvetica-Bold").fontSize(18)
     .text("INSTITUTO DE CIRUGÍA ARTICULAR", 180, 50);
 
   doc.moveDown(1.5);
-  doc
-    .fontSize(16)
+  doc.fontSize(16)
     .text("RECETA MÉDICA", 180, undefined, {
       underline: true,
     });
@@ -54,36 +56,34 @@ export function generarRecetaMedica(doc, datos) {
   doc.moveDown(2);
 
   /* ================= MEDICAMENTOS ================= */
-  doc.font("Helvetica-Bold").fontSize(14);
-  doc.text("Tratamiento indicado:");
-  doc.moveDown(1.5);
+  doc.font("Helvetica-Bold").fontSize(14)
+    .text("Tratamiento indicado:");
+  doc.moveDown(1.2);
 
   doc.font("Helvetica").fontSize(13);
 
   if (Array.isArray(medicamentos) && medicamentos.length > 0) {
     medicamentos.forEach((med, index) => {
-      doc.text(
-        `${index + 1}. ${med.nombre ?? ""}`
-      );
-      doc.moveDown(0.5);
+      doc.text(`${index + 1}. ${med.nombre ?? ""}`);
+      doc.moveDown(0.3);
       doc.text(`   Dosis: ${med.dosis ?? ""}`);
       doc.text(`   Frecuencia: ${med.frecuencia ?? ""}`);
       doc.text(`   Duración: ${med.duracion ?? ""}`);
-      doc.moveDown(1.2);
+      doc.moveDown(1);
     });
   } else {
     doc.text("—");
   }
 
-  /* ================= INDICACIONES ADICIONALES ================= */
-  if (typeof indicaciones === "string" && indicaciones.trim()) {
+  /* ================= INDICACIONES ================= */
+  if (indicaciones && indicaciones.trim()) {
     doc.moveDown(1);
     doc.font("Helvetica-Bold").text("Indicaciones:");
-    doc.moveDown(0.8);
+    doc.moveDown(0.5);
     doc.font("Helvetica").text(indicaciones.trim());
   }
 
-  /* ================= FIRMA Y TIMBRE ================= */
+  /* ================= FIRMA DINÁMICA ================= */
   const pageW = doc.page.width;
   const pageH = doc.page.height;
   const marginL = doc.page.margins.left || 50;
@@ -100,9 +100,9 @@ export function generarRecetaMedica(doc, datos) {
     width: pageW - marginL - marginR,
   });
 
-  // Firma
+  // Firma dinámica
   try {
-    const firmaPath = path.join(__dirname, "assets", "FIRMA.png");
+    const firmaPath = path.join(__dirname, "assets", medico.firma);
     if (fs.existsSync(firmaPath)) {
       const firmaW = 250;
       const firmaX = (pageW - firmaW) / 2;
@@ -111,9 +111,9 @@ export function generarRecetaMedica(doc, datos) {
     }
   } catch {}
 
-  // Timbre
+  // Timbre dinámico
   try {
-    const timbrePath = path.join(__dirname, "assets", "timbre.jpg");
+    const timbrePath = path.join(__dirname, "assets", medico.timbre);
     if (fs.existsSync(timbrePath)) {
       const firmaW = 250;
       const firmaX = (pageW - firmaW) / 2;
@@ -130,17 +130,17 @@ export function generarRecetaMedica(doc, datos) {
     }
   } catch {}
 
-  /* ================= PIE ================= */
+  /* ================= PIE DINÁMICO ================= */
   doc.font("Helvetica").fontSize(12);
-  doc.text("Dr. Cristóbal Huerta Cortés", marginL, baseY + 52, {
+  doc.text(medico.nombre, marginL, baseY + 52, {
     align: "center",
     width: pageW - marginL - marginR,
   });
-  doc.text("RUT: 14.015.125-4", {
+  doc.text(`RUT: ${medico.rut}`, {
     align: "center",
     width: pageW - marginL - marginR,
   });
-  doc.text("Cirujano de Reconstrucción Articular", {
+  doc.text(medico.especialidad, {
     align: "center",
     width: pageW - marginL - marginR,
   });
