@@ -17,6 +17,7 @@ from modules.fichas.ficha_create import router as ficha_create_router
 from modules.fichas.ficha_read import router as ficha_read_router
 from modules.fichas.ficha_update import router as ficha_update_router
 from api.gpt_clinical import router as gpt_clinical_router
+from Documentospdf.pdfRouter import router as pdf_router
 
 
 # ==========================
@@ -69,6 +70,9 @@ app.include_router(ficha_update_router)
 
 # 🤖 GPT clínico
 app.include_router(gpt_clinical_router)
+
+# 🧾 PDF
+app.include_router(pdf_router)
 
 # ==========================
 # HEALTHCHECK
