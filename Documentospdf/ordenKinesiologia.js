@@ -1,139 +1,127 @@
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
-import { getProfessionalData } from "./professionalResolver.js";
+# Documentospdf/ordenKinesiologia.py
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import os
+from io import BytesIO
 
-export function generarOrdenKinesiologia(doc, datos) {
-  const {
-    nombre,
-    edad,
-    rut,
-    diagnostico,
-    lado,
-    indicaciones,
-    professional // ← viene del usuario logeado
-  } = datos || {};
+from reportlab.platypus import (
+    SimpleDocTemplate,
+    Paragraph,
+    Spacer,
+    Image
+)
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import inch
 
-  const medico = getProfessionalData(professional);
+from Documentospdf.professionalResolver import getProfessionalData
 
-  if (!medico) {
-    throw new Error("Profesional no encontrado");
-  }
 
-  /* ================= ENCABEZADO ================= */
-  try {
-    const logoPath = path.join(__dirname, "assets", "ica.jpg");
-    if (fs.existsSync(logoPath)) {
-      doc.image(logoPath, 50, 40, { width: 120 });
-    }
-  } catch {}
+def generarOrdenKinesiologia(datos: dict):
 
-  doc.moveDown(1.5);
-  doc.font("Helvetica-Bold").fontSize(18)
-    .text("INSTITUTO DE CIRUGÍA ARTICULAR", 180, 50);
+    buffer = BytesIO()
 
-  doc.moveDown(1.5);
-  doc.fontSize(16)
-    .text("ORDEN DE ATENCIÓN KINÉSICA", 180, undefined, {
-      underline: true,
-    });
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=50,
+        leftMargin=50,
+        topMargin=80,
+        bottomMargin=80
+    )
 
-  doc.moveDown(4);
-  doc.x = doc.page.margins.left;
+    elements = []
+    styles = getSampleStyleSheet()
 
-  /* ================= DATOS PACIENTE ================= */
-  doc.font("Helvetica").fontSize(14);
-  doc.text(`Nombre: ${nombre ?? ""}`);
-  doc.moveDown(1);
-  doc.text(`Edad: ${edad ?? ""}`);
-  doc.moveDown(0.5);
-  doc.text(`RUT: ${rut ?? ""}`);
-  doc.moveDown(0.5);
-  doc.text(`Diagnóstico: ${diagnostico ?? ""} ${lado ?? ""}`);
-  doc.moveDown(2);
+    nombre = datos.get("nombre")
+    edad = datos.get("edad")
+    rut = datos.get("rut")
+    diagnostico = datos.get("diagnostico")
+    lado = datos.get("lado")
+    indicaciones = datos.get("indicaciones")
+    professional = datos.get("professional")
 
-  /* ================= ORDEN ================= */
-  doc.font("Helvetica-Bold").fontSize(20)
-    .text("10 SESIONES DE KINESIOTERAPIA", {
-      align: "center",
-    });
+    medico = getProfessionalData(professional)
 
-  doc.moveDown(2);
+    if not medico:
+        raise Exception("Profesional no encontrado")
 
-  if (indicaciones) {
-    doc.font("Helvetica-Bold").fontSize(14)
-      .text("Indicaciones:");
-    doc.moveDown(0.5);
-    doc.font("Helvetica")
-      .text(indicaciones);
-  }
+    assets_dir = os.path.join(os.path.dirname(__file__), "assets")
 
-  /* ================= FIRMA DINÁMICA ================= */
-  const pageW = doc.page.width;
-  const pageH = doc.page.height;
-  const marginL = doc.page.margins.left || 50;
-  const marginR = doc.page.margins.right || 50;
-  const baseY = pageH - 170;
+    # ================= ENCABEZADO =================
+    logo_path = os.path.join(assets_dir, "ica.jpg")
+    if os.path.exists(logo_path):
+        elements.append(Image(logo_path, width=120, height=50))
+        elements.append(Spacer(1, 12))
 
-  doc.font("Helvetica").fontSize(12);
-  doc.text("_________________________", marginL, baseY, {
-    align: "center",
-    width: pageW - marginL - marginR,
-  });
-  doc.text("Firma y Timbre Médico", marginL, baseY + 18, {
-    align: "center",
-    width: pageW - marginL - marginR,
-  });
+    elements.append(Paragraph(
+        "<b>INSTITUTO DE CIRUGÍA ARTICULAR</b>",
+        styles["Heading1"]
+    ))
+    elements.append(Spacer(1, 6))
 
-  // Firma dinámica
-  try {
-    const firmaPath = path.join(__dirname, "assets", medico.firma);
-    if (fs.existsSync(firmaPath)) {
-      const firmaW = 250;
-      const firmaX = (pageW - firmaW) / 2;
-      const firmaY = baseY - 45;
-      doc.image(firmaPath, firmaX, firmaY, { width: firmaW });
-    }
-  } catch {}
+    elements.append(Paragraph(
+        "<u>ORDEN DE ATENCIÓN KINÉSICA</u>",
+        styles["Heading2"]
+    ))
+    elements.append(Spacer(1, 24))
 
-  // Timbre dinámico
-  try {
-    const timbrePath = path.join(__dirname, "assets", medico.timbre);
-    if (fs.existsSync(timbrePath)) {
-      const firmaW = 250;
-      const firmaX = (pageW - firmaW) / 2;
-      const timbreW = 110;
-      const timbreX = firmaX + firmaW;
-      const timbreY = baseY - 65;
+    # ================= DATOS PACIENTE =================
+    elements.append(Paragraph(f"<b>Nombre:</b> {nombre or ''}", styles["Normal"]))
+    elements.append(Spacer(1, 8))
 
-      doc.save();
-      doc.rotate(20, {
-        origin: [timbreX + timbreW / 2, timbreY + timbreW / 2],
-      });
-      doc.image(timbrePath, timbreX, timbreY, { width: timbreW });
-      doc.restore();
-    }
-  } catch {}
+    elements.append(Paragraph(f"<b>Edad:</b> {edad or ''}", styles["Normal"]))
+    elements.append(Spacer(1, 6))
 
-  /* ================= PIE DINÁMICO ================= */
-  doc.font("Helvetica").fontSize(12);
-  doc.text(medico.nombre, marginL, baseY + 52, {
-    align: "center",
-    width: pageW - marginL - marginR,
-  });
-  doc.text(`RUT: ${medico.rut}`, {
-    align: "center",
-    width: pageW - marginL - marginR,
-  });
-  doc.text(medico.especialidad, {
-    align: "center",
-    width: pageW - marginL - marginR,
-  });
-  doc.text("INSTITUTO DE CIRUGÍA ARTICULAR", {
-    align: "center",
-    width: pageW - marginL - marginR,
-  });
-}
+    elements.append(Paragraph(f"<b>RUT:</b> {rut or ''}", styles["Normal"]))
+    elements.append(Spacer(1, 6))
+
+    elements.append(Paragraph(
+        f"<b>Diagnóstico:</b> {(diagnostico or '')} {(lado or '')}",
+        styles["Normal"]
+    ))
+    elements.append(Spacer(1, 24))
+
+    # ================= ORDEN =================
+    elements.append(Paragraph(
+        "<b><font size=16>10 SESIONES DE KINESIOTERAPIA</font></b>",
+        styles["Normal"]
+    ))
+    elements.append(Spacer(1, 24))
+
+    if indicaciones:
+        elements.append(Paragraph("<b>Indicaciones:</b>", styles["Heading3"]))
+        elements.append(Spacer(1, 6))
+        elements.append(Paragraph(indicaciones, styles["Normal"]))
+        elements.append(Spacer(1, 20))
+
+    elements.append(Spacer(1, 40))
+
+    # ================= FIRMA =================
+    elements.append(Paragraph("______________________________", styles["Normal"]))
+    elements.append(Spacer(1, 6))
+    elements.append(Paragraph("Firma y Timbre Médico", styles["Normal"]))
+    elements.append(Spacer(1, 12))
+
+    # Firma
+    firma_path = os.path.join(assets_dir, medico.get("firma", ""))
+    if os.path.exists(firma_path):
+        elements.append(Image(firma_path, width=200, height=60))
+        elements.append(Spacer(1, 12))
+
+    # Timbre
+    timbre_path = os.path.join(assets_dir, medico.get("timbre", ""))
+    if os.path.exists(timbre_path):
+        elements.append(Image(timbre_path, width=100, height=100))
+        elements.append(Spacer(1, 12))
+
+    # ================= PIE =================
+    elements.append(Spacer(1, 12))
+    elements.append(Paragraph(f"<b>{medico.get('nombre','')}</b>", styles["Normal"]))
+    elements.append(Paragraph(f"RUT: {medico.get('rut','')}", styles["Normal"]))
+    elements.append(Paragraph(medico.get("especialidad",""), styles["Normal"]))
+    elements.append(Paragraph("INSTITUTO DE CIRUGÍA ARTICULAR", styles["Normal"]))
+
+    doc.build(elements)
+
+    buffer.seek(0)
+    return buffer
