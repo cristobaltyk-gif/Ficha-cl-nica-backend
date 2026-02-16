@@ -14,7 +14,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import inch
 from reportlab.lib import colors
 
-from pdf.professional_resolver import get_professional_data
+from Documentospdf.professionalResolver import getProfessionalData
 
 
 def generar_informe_pdf(data: dict, professional_id: str):
