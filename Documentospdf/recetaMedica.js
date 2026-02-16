@@ -1,151 +1,116 @@
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
-import { getProfessionalData } from "./professionalResolver.js";
+# Documentospdf/recetaMedica.py
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import os
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
+from reportlab.lib.utils import ImageReader
+from professionalResolver import getProfessionalData
 
-export function generarRecetaMedica(doc, datos) {
-  const {
-    nombre,
-    edad,
-    rut,
-    diagnostico,
-    medicamentos,
-    indicaciones,
-    professional // ← viene del login
-  } = datos || {};
 
-  const medico = getProfessionalData(professional);
+def generarRecetaMedica(buffer, datos):
 
-  if (!medico) {
-    throw new Error("Profesional no encontrado");
-  }
+    nombre = datos.get("nombre")
+    edad = datos.get("edad")
+    rut = datos.get("rut")
+    diagnostico = datos.get("diagnostico")
+    medicamentos = datos.get("medicamentos")
+    indicaciones = datos.get("indicaciones")
+    professional = datos.get("professional")
 
-  /* ================= ENCABEZADO ================= */
-  try {
-    const logoPath = path.join(__dirname, "assets", "ica.jpg");
-    if (fs.existsSync(logoPath)) {
-      doc.image(logoPath, 50, 40, { width: 120 });
-    }
-  } catch {}
+    medico = getProfessionalData(professional)
 
-  doc.moveDown(1.5);
-  doc.font("Helvetica-Bold").fontSize(18)
-    .text("INSTITUTO DE CIRUGÍA ARTICULAR", 180, 50);
+    if not medico:
+        raise Exception("Profesional no encontrado")
 
-  doc.moveDown(1.5);
-  doc.fontSize(16)
-    .text("RECETA MÉDICA", 180, undefined, {
-      underline: true,
-    });
+    c = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
 
-  doc.moveDown(4);
-  doc.x = doc.page.margins.left;
+    base_dir = os.path.dirname(__file__)
+    assets_dir = os.path.join(base_dir, "assets")
 
-  /* ================= DATOS PACIENTE ================= */
-  doc.font("Helvetica").fontSize(14);
-  doc.text(`Nombre: ${nombre ?? ""}`);
-  doc.moveDown(1);
-  doc.text(`Edad: ${edad ?? ""}`);
-  doc.moveDown(0.5);
-  doc.text(`RUT: ${rut ?? ""}`);
-  doc.moveDown(0.5);
-  doc.text(`Diagnóstico: ${diagnostico ?? ""}`);
-  doc.moveDown(2);
+    # ================= ENCABEZADO =================
+    logo_path = os.path.join(assets_dir, "ica.jpg")
+    if os.path.exists(logo_path):
+        c.drawImage(ImageReader(logo_path), 50, height - 100, width=120, preserveAspectRatio=True)
 
-  /* ================= MEDICAMENTOS ================= */
-  doc.font("Helvetica-Bold").fontSize(14)
-    .text("Tratamiento indicado:");
-  doc.moveDown(1.2);
+    c.setFont("Helvetica-Bold", 18)
+    c.drawString(180, height - 60, "INSTITUTO DE CIRUGÍA ARTICULAR")
 
-  doc.font("Helvetica").fontSize(13);
+    c.setFont("Helvetica", 16)
+    c.drawString(180, height - 90, "RECETA MÉDICA")
 
-  if (Array.isArray(medicamentos) && medicamentos.length > 0) {
-    medicamentos.forEach((med, index) => {
-      doc.text(`${index + 1}. ${med.nombre ?? ""}`);
-      doc.moveDown(0.3);
-      doc.text(`   Dosis: ${med.dosis ?? ""}`);
-      doc.text(`   Frecuencia: ${med.frecuencia ?? ""}`);
-      doc.text(`   Duración: ${med.duracion ?? ""}`);
-      doc.moveDown(1);
-    });
-  } else {
-    doc.text("—");
-  }
+    y = height - 150
 
-  /* ================= INDICACIONES ================= */
-  if (indicaciones && indicaciones.trim()) {
-    doc.moveDown(1);
-    doc.font("Helvetica-Bold").text("Indicaciones:");
-    doc.moveDown(0.5);
-    doc.font("Helvetica").text(indicaciones.trim());
-  }
+    # ================= DATOS PACIENTE =================
+    c.setFont("Helvetica", 14)
+    c.drawString(50, y, f"Nombre: {nombre or ''}")
+    y -= 25
+    c.drawString(50, y, f"Edad: {edad or ''}")
+    y -= 20
+    c.drawString(50, y, f"RUT: {rut or ''}")
+    y -= 20
+    c.drawString(50, y, f"Diagnóstico: {diagnostico or ''}")
+    y -= 40
 
-  /* ================= FIRMA DINÁMICA ================= */
-  const pageW = doc.page.width;
-  const pageH = doc.page.height;
-  const marginL = doc.page.margins.left || 50;
-  const marginR = doc.page.margins.right || 50;
-  const baseY = pageH - 170;
+    # ================= MEDICAMENTOS =================
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(50, y, "Tratamiento indicado:")
+    y -= 30
 
-  doc.font("Helvetica").fontSize(12);
-  doc.text("_________________________", marginL, baseY, {
-    align: "center",
-    width: pageW - marginL - marginR,
-  });
-  doc.text("Firma y Timbre Médico", marginL, baseY + 18, {
-    align: "center",
-    width: pageW - marginL - marginR,
-  });
+    c.setFont("Helvetica", 13)
 
-  // Firma dinámica
-  try {
-    const firmaPath = path.join(__dirname, "assets", medico.firma);
-    if (fs.existsSync(firmaPath)) {
-      const firmaW = 250;
-      const firmaX = (pageW - firmaW) / 2;
-      const firmaY = baseY - 45;
-      doc.image(firmaPath, firmaX, firmaY, { width: firmaW });
-    }
-  } catch {}
+    if isinstance(medicamentos, list) and len(medicamentos) > 0:
+        for i, med in enumerate(medicamentos):
+            c.drawString(60, y, f"{i+1}. {med.get('nombre','')}")
+            y -= 18
+            c.drawString(80, y, f"Dosis: {med.get('dosis','')}")
+            y -= 18
+            c.drawString(80, y, f"Frecuencia: {med.get('frecuencia','')}")
+            y -= 18
+            c.drawString(80, y, f"Duración: {med.get('duracion','')}")
+            y -= 25
+    else:
+        c.drawString(60, y, "—")
+        y -= 30
 
-  // Timbre dinámico
-  try {
-    const timbrePath = path.join(__dirname, "assets", medico.timbre);
-    if (fs.existsSync(timbrePath)) {
-      const firmaW = 250;
-      const firmaX = (pageW - firmaW) / 2;
-      const timbreW = 110;
-      const timbreX = firmaX + firmaW;
-      const timbreY = baseY - 65;
+    # ================= INDICACIONES =================
+    if indicaciones and indicaciones.strip():
+        c.setFont("Helvetica-Bold", 14)
+        c.drawString(50, y, "Indicaciones:")
+        y -= 20
 
-      doc.save();
-      doc.rotate(20, {
-        origin: [timbreX + timbreW / 2, timbreY + timbreW / 2],
-      });
-      doc.image(timbrePath, timbreX, timbreY, { width: timbreW });
-      doc.restore();
-    }
-  } catch {}
+        c.setFont("Helvetica", 12)
+        text_obj = c.beginText(50, y)
+        text_obj.textLines(indicaciones.strip())
+        c.drawText(text_obj)
 
-  /* ================= PIE DINÁMICO ================= */
-  doc.font("Helvetica").fontSize(12);
-  doc.text(medico.nombre, marginL, baseY + 52, {
-    align: "center",
-    width: pageW - marginL - marginR,
-  });
-  doc.text(`RUT: ${medico.rut}`, {
-    align: "center",
-    width: pageW - marginL - marginR,
-  });
-  doc.text(medico.especialidad, {
-    align: "center",
-    width: pageW - marginL - marginR,
-  });
-  doc.text("INSTITUTO DE CIRUGÍA ARTICULAR", {
-    align: "center",
-    width: pageW - marginL - marginR,
-  });
-}
+    # ================= FIRMA =================
+    baseY = 170
+
+    c.setFont("Helvetica", 12)
+    c.drawCentredString(width / 2, baseY, "_________________________")
+    c.drawCentredString(width / 2, baseY - 18, "Firma y Timbre Médico")
+
+    # Firma
+    firma_path = os.path.join(assets_dir, medico.get("firma", ""))
+    if os.path.exists(firma_path):
+        c.drawImage(ImageReader(firma_path), width/2 - 125, baseY + 10, width=250, preserveAspectRatio=True)
+
+    # Timbre
+    timbre_path = os.path.join(assets_dir, medico.get("timbre", ""))
+    if os.path.exists(timbre_path):
+        c.saveState()
+        c.translate(width/2 + 125, baseY + 40)
+        c.rotate(20)
+        c.drawImage(ImageReader(timbre_path), 0, 0, width=110, preserveAspectRatio=True)
+        c.restoreState()
+
+    # ================= PIE =================
+    c.setFont("Helvetica", 12)
+    c.drawCentredString(width / 2, baseY - 50, medico.get("nombre", ""))
+    c.drawCentredString(width / 2, baseY - 65, f"RUT: {medico.get('rut','')}")
+    c.drawCentredString(width / 2, baseY - 80, medico.get("especialidad", ""))
+    c.drawCentredString(width / 2, baseY - 95, "INSTITUTO DE CIRUGÍA ARTICULAR")
+
+    c.showPage()
+    c.save()
