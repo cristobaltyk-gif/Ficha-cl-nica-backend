@@ -28,7 +28,6 @@ def build_response(buffer: BytesIO, filename: str):
 
 
 def get_professional_from_header(request: Request) -> str:
-
     professional = request.headers.get("x-internal-user")
 
     if not professional:
@@ -51,8 +50,9 @@ async def receta(request: Request, body: dict):
 
     buffer = BytesIO()
 
-    # tu función espera (buffer, datos)
+    # 🔥 inyectamos el profesional automáticamente
     body["professional"] = professional
+
     generarRecetaMedica(buffer, body)
 
     return build_response(buffer, "receta_medica")
@@ -67,6 +67,7 @@ async def informe(request: Request, body: dict):
 
     professional = get_professional_from_header(request)
 
+    # Esta función ya recibe (data, professional_id)
     buffer = generar_informe_pdf(body, professional)
 
     return build_response(buffer, "informe_medico")
@@ -82,6 +83,7 @@ async def kinesiologia(request: Request, body: dict):
     professional = get_professional_from_header(request)
 
     body["professional"] = professional
+
     buffer = generarOrdenKinesiologia(body)
 
     return build_response(buffer, "orden_kinesiologia")
@@ -97,6 +99,7 @@ async def quirurgica(request: Request, body: dict):
     professional = get_professional_from_header(request)
 
     body["professional"] = professional
+
     buffer = generarOrdenQuirurgica(body)
 
     return build_response(buffer, "orden_quirurgica")
