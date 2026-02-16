@@ -2,17 +2,15 @@ from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import StreamingResponse
 from io import BytesIO
 
-from Documentospdf.recetaMedica import generar_receta_pdf
+from Documentospdf.recetaMedica import generarRecetaMedica
 from Documentospdf.informeMedico import generar_informe_pdf
-from Documentospdf.ordenKinesiologia import generar_kinesiologia_pdf
-from Documentospdf.ordenQuirurgica import generar_quirurgica_pdf
-
+from Documentospdf.ordenKinesiologia import generarOrdenKinesiologia
+from Documentospdf.ordenQuirurgica import generarOrdenQuirurgica
 
 router = APIRouter(
     prefix="/api/pdf",
     tags=["PDF"]
 )
-
 
 # =====================================================
 # Helper común
@@ -20,7 +18,6 @@ router = APIRouter(
 
 def build_response(buffer: BytesIO, filename: str):
     buffer.seek(0)
-
     return StreamingResponse(
         buffer,
         media_type="application/pdf",
@@ -31,11 +28,6 @@ def build_response(buffer: BytesIO, filename: str):
 
 
 def get_professional_from_header(request: Request) -> str:
-    """
-    Obtiene el profesional desde el header enviado por frontend.
-    El frontend debe enviar:
-    X-Internal-User: <usuario_logeado>
-    """
 
     professional = request.headers.get("x-internal-user")
 
@@ -57,7 +49,11 @@ async def receta(request: Request, body: dict):
 
     professional = get_professional_from_header(request)
 
-    buffer = generar_receta_pdf(body, professional)
+    buffer = BytesIO()
+
+    # tu función espera (buffer, datos)
+    body["professional"] = professional
+    generarRecetaMedica(buffer, body)
 
     return build_response(buffer, "receta_medica")
 
@@ -85,7 +81,8 @@ async def kinesiologia(request: Request, body: dict):
 
     professional = get_professional_from_header(request)
 
-    buffer = generar_kinesiologia_pdf(body, professional)
+    body["professional"] = professional
+    buffer = generarOrdenKinesiologia(body)
 
     return build_response(buffer, "orden_kinesiologia")
 
@@ -99,6 +96,7 @@ async def quirurgica(request: Request, body: dict):
 
     professional = get_professional_from_header(request)
 
-    buffer = generar_quirurgica_pdf(body, professional)
+    body["professional"] = professional
+    buffer = generarOrdenQuirurgica(body)
 
     return build_response(buffer, "orden_quirurgica")
