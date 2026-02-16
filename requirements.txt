@@ -40,3 +40,8 @@ pytest
 # OpenAI (GPT clínico)
 # =========================
 openai>=1.0.0
+
+# =========================
+# PDF generation
+# =========================
+reportlab
