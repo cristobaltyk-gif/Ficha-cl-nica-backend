@@ -1,11 +1,14 @@
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from io import BytesIO
+
+from auth.internal_auth import require_internal_auth
 
 from Documentospdf.recetaMedica import generarRecetaMedica
 from Documentospdf.informeMedico import generar_informe_pdf
 from Documentospdf.ordenKinesiologia import generarOrdenKinesiologia
 from Documentospdf.ordenQuirurgica import generarOrdenQuirurgica
+
 
 router = APIRouter(
     prefix="/api/pdf",
@@ -26,31 +29,20 @@ def build_response(buffer: BytesIO, filename: str):
         }
     )
 
-
-def get_professional_from_header(request: Request) -> str:
-    professional = request.headers.get("x-internal-user")
-
-    if not professional:
-        raise HTTPException(
-            status_code=401,
-            detail="Profesional no autorizado"
-        )
-
-    return professional
-
-
 # =====================================================
 # RECETA
 # =====================================================
 
 @router.post("/receta")
-async def receta(request: Request, body: dict):
+async def receta(
+    body: dict,
+    auth = Depends(require_internal_auth)
+):
 
-    professional = get_professional_from_header(request)
+    professional = auth["professional"]
 
     buffer = BytesIO()
 
-    # 🔥 inyectamos el profesional automáticamente
     body["professional"] = professional
 
     generarRecetaMedica(buffer, body)
@@ -63,11 +55,13 @@ async def receta(request: Request, body: dict):
 # =====================================================
 
 @router.post("/informe")
-async def informe(request: Request, body: dict):
+async def informe(
+    body: dict,
+    auth = Depends(require_internal_auth)
+):
 
-    professional = get_professional_from_header(request)
+    professional = auth["professional"]
 
-    # Esta función ya recibe (data, professional_id)
     buffer = generar_informe_pdf(body, professional)
 
     return build_response(buffer, "informe_medico")
@@ -78,9 +72,12 @@ async def informe(request: Request, body: dict):
 # =====================================================
 
 @router.post("/kinesiologia")
-async def kinesiologia(request: Request, body: dict):
+async def kinesiologia(
+    body: dict,
+    auth = Depends(require_internal_auth)
+):
 
-    professional = get_professional_from_header(request)
+    professional = auth["professional"]
 
     body["professional"] = professional
 
@@ -94,9 +91,12 @@ async def kinesiologia(request: Request, body: dict):
 # =====================================================
 
 @router.post("/quirurgica")
-async def quirurgica(request: Request, body: dict):
+async def quirurgica(
+    body: dict,
+    auth = Depends(require_internal_auth)
+):
 
-    professional = get_professional_from_header(request)
+    professional = auth["professional"]
 
     body["professional"] = professional
 
