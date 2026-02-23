@@ -71,8 +71,8 @@ def generarRecetaMedica(buffer, datos):
             ImageReader(logo_path),
             40,
             height - 210,
-            width =160,
-            height=160,
+            width =130,
+            height=130,
             preserveAspectRatio=True,
             mask="auto"
         )
