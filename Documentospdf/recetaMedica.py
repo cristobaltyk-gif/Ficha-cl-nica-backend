@@ -70,9 +70,9 @@ def generarRecetaMedica(buffer, datos):
         c.drawImage(
             ImageReader(logo_path),
             40,
-            height - 200,
-            width =170,
-            height=170,
+            height - 210,
+            width =160,
+            height=160,
             preserveAspectRatio=True,
             mask="auto"
         )
@@ -87,7 +87,7 @@ def generarRecetaMedica(buffer, datos):
     c.setFont("Helvetica-Bold", 16)
     c.drawString(200, height - 75, "RECETA MÉDICA")
 
-    y = height - 150
+    y = height - 160
 
     # =========================
     # DATOS PACIENTE
@@ -95,13 +95,13 @@ def generarRecetaMedica(buffer, datos):
 
     c.setFont("Helvetica", 12)
     c.drawString(50, y, f"Nombre: {nombre_completo}")
-    y -= 20
+    y -= 30
     c.drawString(50, y, f"Edad: {edad}")
-    y -= 20
+    y -= 30
     c.drawString(50, y, f"RUT: {rut}")
-    y -= 20
+    y -= 30
     c.drawString(50, y, f"Diagnóstico: {diagnostico}")
-    y -= 40
+    y -= 50
 
     # =========================
     # Rp
@@ -109,7 +109,7 @@ def generarRecetaMedica(buffer, datos):
 
     c.setFont("Helvetica-Bold", 18)
     c.drawString(50, y, "Rp.")
-    y -= 30
+    y -= 60
 
     c.setFont("Helvetica", 13)
 
@@ -143,7 +143,7 @@ def generarRecetaMedica(buffer, datos):
     if os.path.exists(timbre_path):
         c.drawImage(
             ImageReader(timbre_path),
-            width/2 + 75,
+            width/2 + 85,
             baseY + 35,
             width=95,
             height=95,
