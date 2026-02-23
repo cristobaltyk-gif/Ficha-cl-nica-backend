@@ -141,15 +141,36 @@ def generarRecetaMedica(buffer, datos):
 
     timbre_path = os.path.join(assets_dir, medico.get("timbre", ""))
     if os.path.exists(timbre_path):
+
+        c.saveState()
+
+        # === MISMOS VALORES ORIGINALES ===
+        timbre_x = width/2 + 85
+        timbre_y = baseY + 35
+        timbre_width = 95
+        timbre_height = 95
+
+        # Mover el origen al centro del timbre
+        c.translate(
+            timbre_x + timbre_width / 2,
+            timbre_y + timbre_height / 2
+        )
+
+        # ROTACIÓN (puedes ajustar grados)
+        c.rotate(-20)
+
+        # Dibujar centrado
         c.drawImage(
             ImageReader(timbre_path),
-            width/2 + 85,
-            baseY + 35,
-            width=95,
-            height=95,
+            -timbre_width / 2,
+            -timbre_height / 2,
+            width=timbre_width,
+            height=timbre_height,
             preserveAspectRatio=True,
             mask="auto"
         )
+
+        c.restoreState()
 
     # =========================
     # LÍNEA Y NOMBRE PROFESIONAL
