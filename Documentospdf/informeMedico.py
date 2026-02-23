@@ -13,6 +13,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import inch
 from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER
 
 from Documentospdf.professionalResolver import getProfessionalData
 
@@ -20,66 +21,123 @@ from Documentospdf.professionalResolver import getProfessionalData
 def generar_informe_pdf(data: dict, professional_id: str):
 
     buffer = BytesIO()
+
     doc = SimpleDocTemplate(
         buffer,
         pagesize=A4,
         rightMargin=50,
         leftMargin=50,
-        topMargin=80,
-        bottomMargin=80
+        topMargin=90,
+        bottomMargin=90
     )
 
     elements = []
     styles = getSampleStyleSheet()
 
-    # Estilo clínico más sobrio
-    estilo_titulo = styles["Heading1"]
-    estilo_seccion = styles["Heading2"]
+    # =========================
+    # ESTILOS ICA
+    # =========================
+
+    estilo_titulo = ParagraphStyle(
+        'TituloICA',
+        parent=styles['Heading1'],
+        alignment=TA_CENTER,
+        fontSize=16,
+        spaceAfter=6
+    )
+
+    estilo_subtitulo = ParagraphStyle(
+        'SubTituloICA',
+        parent=styles['Heading2'],
+        alignment=TA_CENTER,
+        fontSize=14,
+        textColor=colors.black,
+        spaceAfter=20
+    )
+
+    estilo_seccion = ParagraphStyle(
+        'SeccionICA',
+        parent=styles['Heading2'],
+        fontSize=13,
+        spaceBefore=12,
+        spaceAfter=6
+    )
+
     estilo_normal = styles["Normal"]
 
-    medico = get_professional_data(professional_id)
+    # =========================
+    # PROFESIONAL
+    # =========================
+
+    medico = getProfessionalData(professional_id)
 
     if not medico:
         raise Exception("Profesional no encontrado")
 
-    # ================= LOGO =================
-    assets_dir = os.path.join(os.path.dirname(__file__), "assets")
+    # =========================
+    # ASSETS
+    # =========================
+
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    assets_dir = os.path.abspath(os.path.join(current_dir, "..", "assets"))
+
     logo_path = os.path.join(assets_dir, "ica.jpg")
+    firma_path = os.path.join(assets_dir, medico.get("firma", ""))
+    timbre_path = os.path.join(assets_dir, medico.get("timbre", ""))
+
+    # =========================
+    # LOGO
+    # =========================
 
     if os.path.exists(logo_path):
-        elements.append(Image(logo_path, width=120, height=50))
-        elements.append(Spacer(1, 12))
+        elements.append(Image(logo_path, width=120, height=120))
+        elements.append(Spacer(1, 20))
 
-    # ================= ENCABEZADO =================
+    # =========================
+    # ENCABEZADO
+    # =========================
+
     elements.append(Paragraph(
         "<b>INSTITUTO DE CIRUGÍA ARTICULAR</b>",
         estilo_titulo
     ))
+
+    elements.append(Paragraph(
+        "<b>INFORME MÉDICO</b>",
+        estilo_subtitulo
+    ))
+
+    # =========================
+    # DATOS PACIENTE
+    # =========================
+
+    elements.append(Paragraph(
+        f"<b>Nombre:</b> {data.get('nombre','')}",
+        estilo_normal
+    ))
     elements.append(Spacer(1, 6))
 
     elements.append(Paragraph(
-        "<u>INFORME MÉDICO</u>",
-        styles["Heading2"]
+        f"<b>Edad:</b> {data.get('edad','')}",
+        estilo_normal
+    ))
+    elements.append(Spacer(1, 6))
+
+    elements.append(Paragraph(
+        f"<b>RUT:</b> {data.get('rut','')}",
+        estilo_normal
     ))
     elements.append(Spacer(1, 20))
 
-    # ================= DATOS PACIENTE =================
-    elements.append(Paragraph(f"<b>Nombre:</b> {data.get('nombre','')}", estilo_normal))
-    elements.append(Spacer(1, 6))
+    # =========================
+    # SECCIONES CLÍNICAS
+    # =========================
 
-    elements.append(Paragraph(f"<b>Edad:</b> {data.get('edad','')}", estilo_normal))
-    elements.append(Spacer(1, 6))
-
-    elements.append(Paragraph(f"<b>RUT:</b> {data.get('rut','')}", estilo_normal))
-    elements.append(Spacer(1, 18))
-
-    # ================= SECCIONES CLÍNICAS =================
     def seccion(titulo, contenido):
         if contenido and str(contenido).strip():
             elements.append(Paragraph(f"<b>{titulo}</b>", estilo_seccion))
-            elements.append(Spacer(1, 6))
             elements.append(Paragraph(str(contenido).strip(), estilo_normal))
-            elements.append(Spacer(1, 14))
+            elements.append(Spacer(1, 12))
 
     seccion("Motivo de Consulta", data.get("motivoConsulta"))
     seccion("Antecedentes Relevantes", data.get("antecedentes"))
@@ -90,32 +148,67 @@ def generar_informe_pdf(data: dict, professional_id: str):
 
     elements.append(Spacer(1, 40))
 
-    # ================= FIRMA =================
-    elements.append(Paragraph("______________________________", estilo_normal))
+    # =========================
+    # FIRMA
+    # =========================
+
+    elements.append(Paragraph(
+        "_____________________________________",
+        ParagraphStyle(
+            'FirmaLinea',
+            parent=styles['Normal'],
+            alignment=TA_CENTER
+        )
+    ))
     elements.append(Spacer(1, 6))
-    elements.append(Paragraph("Firma y Timbre Médico", estilo_normal))
-    elements.append(Spacer(1, 12))
 
     # Firma imagen
-    firma_path = os.path.join(assets_dir, medico.get("firma", ""))
     if os.path.exists(firma_path):
-        elements.append(Image(firma_path, width=200, height=60))
-        elements.append(Spacer(1, 12))
+        elements.append(Image(firma_path, width=220, height=80))
+        elements.append(Spacer(1, 10))
 
     # Timbre imagen
-    timbre_path = os.path.join(assets_dir, medico.get("timbre", ""))
     if os.path.exists(timbre_path):
-        elements.append(Image(timbre_path, width=100, height=100))
-        elements.append(Spacer(1, 12))
+        elements.append(Image(timbre_path, width=110, height=110))
+        elements.append(Spacer(1, 10))
 
-    # ================= PIE PROFESIONAL =================
-    elements.append(Spacer(1, 12))
-    elements.append(Paragraph(f"<b>{medico.get('nombre','')}</b>", estilo_normal))
-    elements.append(Paragraph(f"RUT: {medico.get('rut','')}", estilo_normal))
-    elements.append(Paragraph(medico.get("especialidad",""), estilo_normal))
-    elements.append(Paragraph("INSTITUTO DE CIRUGÍA ARTICULAR", estilo_normal))
+    # =========================
+    # PIE PROFESIONAL
+    # =========================
 
-    # ================= BUILD =================
+    elements.append(Spacer(1, 10))
+
+    elements.append(Paragraph(
+        f"<b>{medico.get('name','')}</b>",
+        ParagraphStyle(
+            'NombreMedico',
+            parent=styles['Normal'],
+            alignment=TA_CENTER
+        )
+    ))
+
+    elements.append(Paragraph(
+        medico.get("specialty",""),
+        ParagraphStyle(
+            'Especialidad',
+            parent=styles['Normal'],
+            alignment=TA_CENTER
+        )
+    ))
+
+    elements.append(Paragraph(
+        "INSTITUTO DE CIRUGÍA ARTICULAR",
+        ParagraphStyle(
+            'Instituto',
+            parent=styles['Normal'],
+            alignment=TA_CENTER
+        )
+    ))
+
+    # =========================
+    # BUILD
+    # =========================
+
     doc.build(elements)
 
     buffer.seek(0)
