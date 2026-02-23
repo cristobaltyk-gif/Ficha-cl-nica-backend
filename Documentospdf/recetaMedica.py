@@ -70,7 +70,7 @@ def generarRecetaMedica(buffer, datos):
         c.drawImage(
             ImageReader(logo_path),
             40,
-            height - 210,
+            height - 180,
             width =130,
             height=130,
             preserveAspectRatio=True,
@@ -95,13 +95,13 @@ def generarRecetaMedica(buffer, datos):
 
     c.setFont("Helvetica", 12)
     c.drawString(50, y, f"Nombre: {nombre_completo}")
-    y -= 30
-    c.drawString(50, y, f"Edad: {edad}")
-    y -= 30
-    c.drawString(50, y, f"RUT: {rut}")
-    y -= 30
-    c.drawString(50, y, f"Diagnóstico: {diagnostico}")
     y -= 50
+    c.drawString(50, y, f"Edad: {edad}")
+    y -= 50
+    c.drawString(50, y, f"RUT: {rut}")
+    y -= 50
+    c.drawString(50, y, f"Diagnóstico: {diagnostico}")
+    y -= 60
 
     # =========================
     # Rp
@@ -109,7 +109,7 @@ def generarRecetaMedica(buffer, datos):
 
     c.setFont("Helvetica-Bold", 18)
     c.drawString(50, y, "Rp.")
-    y -= 60
+    y -= 70
 
     c.setFont("Helvetica", 13)
 
@@ -145,7 +145,7 @@ def generarRecetaMedica(buffer, datos):
         c.saveState()
 
         # === MISMOS VALORES ORIGINALES ===
-        timbre_x = width/2 + 85
+        timbre_x = width/2 + 95
         timbre_y = baseY + 35
         timbre_width = 95
         timbre_height = 95
