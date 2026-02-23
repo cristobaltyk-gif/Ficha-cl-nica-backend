@@ -60,3 +60,15 @@
     }
   }
 }
+"public_web": {
+  "password": null,
+  "active": true,
+  "professional": "system",
+  "role": {
+    "name": "public",
+    "entry": "/reservas",
+    "allow": [
+      "agenda_public"
+    ]
+  }
+}
