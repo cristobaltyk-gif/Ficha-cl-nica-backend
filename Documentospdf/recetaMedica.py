@@ -69,9 +69,9 @@ def generarRecetaMedica(buffer, datos):
     if os.path.exists(logo_path):
         c.drawImage(
             ImageReader(logo_path),
-            40,
-            height = 0,
-            width=180,
+            20,
+            height - 20,
+            width =180,
             height=180,
             preserveAspectRatio=True,
             mask="auto"
