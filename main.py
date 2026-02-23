@@ -30,17 +30,21 @@ app = FastAPI(
 )
 
 # ==========================
-# CORS (por entorno)
+# CORS (PRODUCCIÓN REAL)
 # ==========================
 
-FRONTEND_URL = os.getenv("FRONTEND_URL")
+FRONTEND_URLS = os.getenv("FRONTEND_URLS")
 
-if not FRONTEND_URL:
-    raise RuntimeError("Falta variable FRONTEND_URL en Render")
+if not FRONTEND_URLS:
+    raise RuntimeError("Falta variable FRONTEND_URLS en Render")
+
+allowed_origins = [
+    url.strip() for url in FRONTEND_URLS.split(",") if url.strip()
+]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_URL],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
