@@ -4,6 +4,7 @@ import os
 from datetime import datetime, date
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
+from reportlab.lib.utils import ImageReader
 from Documentospdf.professionalResolver import getProfessionalData
 
 
@@ -20,43 +21,65 @@ def calcular_edad(fecha_nacimiento_str):
 
 def generarRecetaMedica(buffer, datos):
 
+    # =========================
+    # PACIENTE
+    # =========================
+
     nombre = datos.get("nombre", "")
+    apellido_paterno = datos.get("apellido_paterno", "")
+    apellido_materno = datos.get("apellido_materno", "")
+
+    nombre_completo = f"{nombre} {apellido_paterno} {apellido_materno}".strip()
+
     rut = datos.get("rut", "")
     diagnostico = datos.get("diagnostico", "")
     texto_rp = datos.get("indicaciones", "")
     professional = datos.get("professional")
 
+    # Edad asegurada
     edad = datos.get("edad")
     if not edad and datos.get("fecha_nacimiento"):
         edad = calcular_edad(datos.get("fecha_nacimiento"))
     if not edad:
         edad = ""
 
+    # =========================
+    # PROFESIONAL
+    # =========================
+
     medico = getProfessionalData(professional)
     if not medico:
         raise Exception("Profesional no encontrado")
 
+    # =========================
+    # CANVAS
+    # =========================
+
     c = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
-
-    # ===== RUTAS ABSOLUTAS CORRECTAS =====
 
     current_dir = os.path.dirname(os.path.abspath(__file__))
     assets_dir = os.path.abspath(os.path.join(current_dir, "..", "assets"))
 
-    # ===== LOGO IZQUIERDA (FIJO) =====
+    # =========================
+    # LOGO IZQUIERDA (MISMA POSICIÓN, MÁS CUADRADO)
+    # =========================
 
     logo_path = os.path.join(assets_dir, "ica.jpg")
     if os.path.exists(logo_path):
         c.drawImage(
-            logo_path,
-            50,                 # izquierda
-            height - 95,        # arriba
-            width=130,
-            height=55           # tamaño fijo, sin preserveAspectRatio
+            ImageReader(logo_path),
+            50,
+            height - 95,
+            width=120,
+            height=70,
+            preserveAspectRatio=True,
+            mask="auto"
         )
 
-    # ===== ENCABEZADO ALINEADO =====
+    # =========================
+    # ENCABEZADO (NO TOCADO)
+    # =========================
 
     c.setFont("Helvetica-Bold", 14)
     c.drawString(200, height - 55, "INSTITUTO DE CIRUGÍA ARTICULAR")
@@ -66,10 +89,12 @@ def generarRecetaMedica(buffer, datos):
 
     y = height - 150
 
-    # ===== DATOS PACIENTE =====
+    # =========================
+    # DATOS PACIENTE
+    # =========================
 
     c.setFont("Helvetica", 12)
-    c.drawString(50, y, f"Nombre: {nombre}")
+    c.drawString(50, y, f"Nombre: {nombre_completo}")
     y -= 20
     c.drawString(50, y, f"Edad: {edad}")
     y -= 20
@@ -78,7 +103,9 @@ def generarRecetaMedica(buffer, datos):
     c.drawString(50, y, f"Diagnóstico: {diagnostico}")
     y -= 40
 
-    # ===== Rp =====
+    # =========================
+    # Rp
+    # =========================
 
     c.setFont("Helvetica-Bold", 18)
     c.drawString(50, y, "Rp.")
@@ -94,33 +121,40 @@ def generarRecetaMedica(buffer, datos):
     else:
         c.drawString(70, y, "____________________________")
 
-    # ===== FIRMA Y TIMBRE ABAJO =====
+    # =========================
+    # FIRMA Y TIMBRE (MISMA POSICIÓN, MÁS CUADRADO)
+    # =========================
 
     baseY = 110
 
-    # Firma
     firma_path = os.path.join(assets_dir, medico.get("firma", ""))
     if os.path.exists(firma_path):
         c.drawImage(
-            firma_path,
-            width/2 - 120,
+            ImageReader(firma_path),
+            width/2 - 110,
             baseY + 25,
-            width=240,
-            height=60
+            width=220,
+            height=85,
+            preserveAspectRatio=True,
+            mask="auto"
         )
 
-    # Timbre superpuesto a la firma
     timbre_path = os.path.join(assets_dir, medico.get("timbre", ""))
     if os.path.exists(timbre_path):
         c.drawImage(
-            timbre_path,
-            width/2 + 70,
+            ImageReader(timbre_path),
+            width/2 + 75,
             baseY + 35,
-            width=90,
-            height=90
+            width=95,
+            height=95,
+            preserveAspectRatio=True,
+            mask="auto"
         )
 
-    # Línea + nombre
+    # =========================
+    # LÍNEA Y NOMBRE PROFESIONAL
+    # =========================
+
     c.setFont("Helvetica", 11)
     c.drawCentredString(width/2, baseY, "_____________________________________")
     c.drawCentredString(width/2, baseY - 15, medico.get("name", ""))
