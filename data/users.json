@@ -72,3 +72,18 @@
     ]
   }
 }
+"jaespinoza": {
+  "password": "Espinoza123",
+  "active": true,
+  "professional": "espinoza",
+  "role": {
+    "name": "medico",
+    "entry": "/medico",
+    "allow": [
+      "agenda",
+      "pacientes",
+      "atencion",
+      "documentos"
+    ]
+  }
+}
