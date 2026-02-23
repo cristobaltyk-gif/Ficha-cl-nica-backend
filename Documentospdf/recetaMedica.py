@@ -36,7 +36,6 @@ def generarRecetaMedica(buffer, datos):
     texto_rp = datos.get("indicaciones", "")
     professional = datos.get("professional")
 
-    # Edad asegurada
     edad = datos.get("edad")
     if not edad and datos.get("fecha_nacimiento"):
         edad = calcular_edad(datos.get("fecha_nacimiento"))
@@ -62,7 +61,7 @@ def generarRecetaMedica(buffer, datos):
     assets_dir = os.path.abspath(os.path.join(current_dir, "..", "assets"))
 
     # =========================
-    # LOGO IZQUIERDA (MISMA POSICIÓN, MÁS CUADRADO)
+    # LOGO (alineación fina, mismo tamaño)
     # =========================
 
     logo_path = os.path.join(assets_dir, "ica.jpg")
@@ -70,96 +69,98 @@ def generarRecetaMedica(buffer, datos):
         c.drawImage(
             ImageReader(logo_path),
             40,
-            height - 180,
-            width =130,
+            height - 190,  # pequeño ajuste vertical
+            width=130,
             height=130,
             preserveAspectRatio=True,
             mask="auto"
         )
 
     # =========================
-    # ENCABEZADO (NO TOCADO)
+    # ENCABEZADO (mejor centrado visual)
     # =========================
 
     c.setFont("Helvetica-Bold", 14)
     c.drawString(200, height - 55, "INSTITUTO DE CIRUGÍA ARTICULAR")
 
     c.setFont("Helvetica-Bold", 16)
-    c.drawString(200, height - 75, "RECETA MÉDICA")
+    c.drawString(200, height - 78, "RECETA MÉDICA")
 
-    y = height - 160
+    y = height - 170
 
     # =========================
-    # DATOS PACIENTE
+    # DATOS PACIENTE (espaciado más armónico)
     # =========================
 
     c.setFont("Helvetica", 12)
-    c.drawString(50, y, f"Nombre: {nombre_completo}")
-    y -= 50
-    c.drawString(50, y, f"Edad: {edad}")
-    y -= 50
-    c.drawString(50, y, f"RUT: {rut}")
-    y -= 50
-    c.drawString(50, y, f"Diagnóstico: {diagnostico}")
-    y -= 60
+
+    c.drawString(60, y, f"Nombre: {nombre_completo}")
+    y -= 28
+
+    c.drawString(60, y, f"Edad: {edad}")
+    y -= 28
+
+    c.drawString(60, y, f"RUT: {rut}")
+    y -= 28
+
+    c.drawString(60, y, f"Diagnóstico: {diagnostico}")
+    y -= 45
 
     # =========================
-    # Rp
+    # Rp.
     # =========================
 
     c.setFont("Helvetica-Bold", 18)
-    c.drawString(50, y, "Rp.")
-    y -= 70
+    c.drawString(60, y, "Rp.")
+    y -= 55
 
     c.setFont("Helvetica", 13)
 
     if texto_rp:
-        text_obj = c.beginText(70, y)
+        text_obj = c.beginText(75, y)
         text_obj.setLeading(18)
         text_obj.textLines(texto_rp)
         c.drawText(text_obj)
     else:
-        c.drawString(70, y, "____________________________")
+        c.drawString(75, y, "____________________________")
 
     # =========================
-    # FIRMA Y TIMBRE (MISMA POSICIÓN, MÁS CUADRADO)
+    # FIRMA Y TIMBRE
     # =========================
 
     baseY = 110
 
+    # FIRMA (misma posición, pequeño ajuste visual)
     firma_path = os.path.join(assets_dir, medico.get("firma", ""))
     if os.path.exists(firma_path):
         c.drawImage(
             ImageReader(firma_path),
             width/2 - 110,
-            baseY + 25,
+            baseY + 30,
             width=220,
             height=85,
             preserveAspectRatio=True,
             mask="auto"
         )
 
+    # TIMBRE (rotado, mismo tamaño)
     timbre_path = os.path.join(assets_dir, medico.get("timbre", ""))
     if os.path.exists(timbre_path):
 
         c.saveState()
 
-        # === MISMOS VALORES ORIGINALES ===
         timbre_x = width/2 + 95
         timbre_y = baseY + 35
         timbre_width = 95
         timbre_height = 95
 
-        # Mover el origen al centro del timbre
         c.translate(
             timbre_x + timbre_width / 2,
             timbre_y + timbre_height / 2
         )
 
-        # ROTACIÓN (puedes ajustar grados)
         c.rotate(-20)
 
-        # Dibujar centrado
         c.drawImage(
             ImageReader(timbre_path),
             -timbre_width / 2,
@@ -177,10 +178,11 @@ def generarRecetaMedica(buffer, datos):
     # =========================
 
     c.setFont("Helvetica", 11)
+
     c.drawCentredString(width/2, baseY, "_____________________________________")
-    c.drawCentredString(width/2, baseY - 15, medico.get("name", ""))
+    c.drawCentredString(width/2, baseY - 16, medico.get("name", ""))
     c.drawCentredString(width/2, baseY - 30, medico.get("specialty", ""))
-    c.drawCentredString(width/2, baseY - 45, "INSTITUTO DE CIRUGÍA ARTICULAR")
+    c.drawCentredString(width/2, baseY - 44, "INSTITUTO DE CIRUGÍA ARTICULAR")
 
     c.showPage()
     c.save()
