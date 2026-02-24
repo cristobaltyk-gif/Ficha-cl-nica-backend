@@ -46,10 +46,26 @@
     }
   },
 
-  "kine1": {
-    "password": "kine123",
+  "jaespinoza": {
+    "password": "Espinoza123",
     "active": true,
-    "professional": "kine1",
+    "professional": "espinoza",
+    "role": {
+      "name": "medico",
+      "entry": "/medico",
+      "allow": [
+        "agenda",
+        "pacientes",
+        "atencion",
+        "documentos"
+      ]
+    }
+  },
+
+  "gcastillo": {
+    "password": "KineGabriel123",
+    "active": true,
+    "professional": "gcastillo",
     "role": {
       "name": "kinesiologia",
       "entry": "/kine",
@@ -69,22 +85,6 @@
       "entry": "/reservas",
       "allow": [
         "agenda_public"
-      ]
-    }
-  },
-
-  "jaespinoza": {
-    "password": "Espinoza123",
-    "active": true,
-    "professional": "espinoza",
-    "role": {
-      "name": "medico",
-      "entry": "/medico",
-      "allow": [
-        "agenda",
-        "pacientes",
-        "atencion",
-        "documentos"
       ]
     }
   }
