@@ -84,7 +84,7 @@ def generarRecetaMedica(buffer, datos):
     c.drawString(200, height - 55, "INSTITUTO DE CIRUGÍA ARTICULAR")
 
     c.setFont("Helvetica-Bold", 16)
-    c.drawString(200, height - 78, "RECETA MÉDICA")
+    c.drawString(200, height - 78, "ORDEN DE EXAMENES")
 
     y = height - 170
 
