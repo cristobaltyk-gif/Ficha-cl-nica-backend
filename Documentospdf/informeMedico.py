@@ -1,215 +1,188 @@
-# pdf/informe.py
+# Documentospdf// informemedixo.py
 
 import os
-from io import BytesIO
-
-from reportlab.platypus import (
-    SimpleDocTemplate,
-    Paragraph,
-    Spacer,
-    Image
-)
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from datetime import datetime, date
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.units import inch
-from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER
-
+from reportlab.pdfgen import canvas
+from reportlab.lib.utils import ImageReader
 from Documentospdf.professionalResolver import getProfessionalData
 
 
-def generar_informe_pdf(data: dict, professional_id: str):
+def calcular_edad(fecha_nacimiento_str):
+    try:
+        nacimiento = datetime.strptime(fecha_nacimiento_str, "%Y-%m-%d").date()
+        hoy = date.today()
+        return hoy.year - nacimiento.year - (
+            (hoy.month, hoy.day) < (nacimiento.month, nacimiento.day)
+        )
+    except:
+        return ""
 
-    buffer = BytesIO()
 
-    doc = SimpleDocTemplate(
-        buffer,
-        pagesize=A4,
-        rightMargin=50,
-        leftMargin=50,
-        topMargin=90,
-        bottomMargin=90
-    )
-
-    elements = []
-    styles = getSampleStyleSheet()
+def generarRecetaMedica(buffer, datos):
 
     # =========================
-    # ESTILOS ICA
+    # PACIENTE
     # =========================
 
-    estilo_titulo = ParagraphStyle(
-        'TituloICA',
-        parent=styles['Heading1'],
-        alignment=TA_CENTER,
-        fontSize=16,
-        spaceAfter=6
-    )
+    nombre = datos.get("nombre", "")
+    apellido_paterno = datos.get("apellido_paterno", "")
+    apellido_materno = datos.get("apellido_materno", "")
 
-    estilo_subtitulo = ParagraphStyle(
-        'SubTituloICA',
-        parent=styles['Heading2'],
-        alignment=TA_CENTER,
-        fontSize=14,
-        textColor=colors.black,
-        spaceAfter=20
-    )
+    nombre_completo = f"{nombre} {apellido_paterno} {apellido_materno}".strip()
 
-    estilo_seccion = ParagraphStyle(
-        'SeccionICA',
-        parent=styles['Heading2'],
-        fontSize=13,
-        spaceBefore=12,
-        spaceAfter=6
-    )
+    rut = datos.get("rut", "")
+    diagnostico = datos.get("diagnostico", "")
+    texto_rp = datos.get("indicaciones", "")
+    professional = datos.get("professional")
 
-    estilo_normal = styles["Normal"]
+    edad = datos.get("edad")
+    if not edad and datos.get("fecha_nacimiento"):
+        edad = calcular_edad(datos.get("fecha_nacimiento"))
+    if not edad:
+        edad = ""
 
     # =========================
     # PROFESIONAL
     # =========================
 
-    medico = getProfessionalData(professional_id)
-
+    medico = getProfessionalData(professional)
     if not medico:
         raise Exception("Profesional no encontrado")
 
     # =========================
-    # ASSETS
+    # CANVAS
     # =========================
+
+    c = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
 
     current_dir = os.path.dirname(os.path.abspath(__file__))
     assets_dir = os.path.abspath(os.path.join(current_dir, "..", "assets"))
 
+    # =========================
+    # LOGO (alineación fina, mismo tamaño)
+    # =========================
+
     logo_path = os.path.join(assets_dir, "ica.jpg")
-    firma_path = os.path.join(assets_dir, medico.get("firma", ""))
-    timbre_path = os.path.join(assets_dir, medico.get("timbre", ""))
-
-    # =========================
-    # LOGO
-    # =========================
-
     if os.path.exists(logo_path):
-        elements.append(Image(logo_path, width=120, height=120))
-        elements.append(Spacer(1, 20))
-
-    # =========================
-    # ENCABEZADO
-    # =========================
-
-    elements.append(Paragraph(
-        "<b>INSTITUTO DE CIRUGÍA ARTICULAR</b>",
-        estilo_titulo
-    ))
-
-    elements.append(Paragraph(
-        "<b>INFORME MÉDICO</b>",
-        estilo_subtitulo
-    ))
-
-    # =========================
-    # DATOS PACIENTE
-    # =========================
-
-    elements.append(Paragraph(
-        f"<b>Nombre:</b> {data.get('nombre','')}",
-        estilo_normal
-    ))
-    elements.append(Spacer(1, 6))
-
-    elements.append(Paragraph(
-        f"<b>Edad:</b> {data.get('edad','')}",
-        estilo_normal
-    ))
-    elements.append(Spacer(1, 6))
-
-    elements.append(Paragraph(
-        f"<b>RUT:</b> {data.get('rut','')}",
-        estilo_normal
-    ))
-    elements.append(Spacer(1, 20))
-
-    # =========================
-    # SECCIONES CLÍNICAS
-    # =========================
-
-    def seccion(titulo, contenido):
-        if contenido and str(contenido).strip():
-            elements.append(Paragraph(f"<b>{titulo}</b>", estilo_seccion))
-            elements.append(Paragraph(str(contenido).strip(), estilo_normal))
-            elements.append(Spacer(1, 12))
-
-    seccion("Motivo de Consulta", data.get("motivoConsulta"))
-    seccion("Antecedentes Relevantes", data.get("antecedentes"))
-    seccion("Examen Físico", data.get("examenFisico"))
-    seccion("Estudios Complementarios", data.get("estudios"))
-    seccion("Impresión Diagnóstica", data.get("impresionDiagnostica"))
-    seccion("Plan y Conducta", data.get("plan"))
-
-    elements.append(Spacer(1, 40))
-
-    # =========================
-    # FIRMA
-    # =========================
-
-    elements.append(Paragraph(
-        "_____________________________________",
-        ParagraphStyle(
-            'FirmaLinea',
-            parent=styles['Normal'],
-            alignment=TA_CENTER
+        c.drawImage(
+            ImageReader(logo_path),
+            60,
+            height - 155,  # pequeño ajuste vertical
+            width=110,
+            height=110,
+            preserveAspectRatio=True,
+            mask="auto"
         )
-    ))
-    elements.append(Spacer(1, 6))
 
-    # Firma imagen
+    # =========================
+    # ENCABEZADO (mejor centrado visual)
+    # =========================
+
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(200, height - 55, "INSTITUTO DE CIRUGÍA ARTICULAR")
+
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(200, height - 78, "INFORME MEDICO")
+
+    y = height - 170
+
+    # =========================
+    # DATOS PACIENTE (espaciado más armónico)
+    # =========================
+
+    c.setFont("Helvetica", 12)
+
+    c.drawString(60, y, f"Nombre: {nombre_completo}")
+    y -= 28
+
+    c.drawString(60, y, f"Edad: {edad}")
+    y -= 28
+
+    c.drawString(60, y, f"RUT: {rut}")
+    y -= 28
+
+    c.drawString(60, y, f"Diagnóstico: {diagnostico}")
+    y -= 45
+
+    # =========================
+    # Rp.
+    # =========================
+
+    c.setFont("Helvetica-Bold", 18)
+    c.drawString(60, y, "Rp.")
+    y -= 55
+
+    c.setFont("Helvetica", 13)
+
+    if texto_rp:
+        text_obj = c.beginText(75, y)
+        text_obj.setLeading(18)
+        text_obj.textLines(texto_rp)
+        c.drawText(text_obj)
+    else:
+        c.drawString(75, y, "____________________________")
+
+    # =========================
+    # FIRMA Y TIMBRE
+    # =========================
+
+    baseY = 110
+
+    # FIRMA (misma posición, pequeño ajuste visual)
+    firma_path = os.path.join(assets_dir, medico.get("firma", ""))
     if os.path.exists(firma_path):
-        elements.append(Image(firma_path, width=220, height=80))
-        elements.append(Spacer(1, 10))
+        c.drawImage(
+            ImageReader(firma_path),
+            width/2 - 110,
+            baseY + 30,
+            width=220,
+            height=85,
+            preserveAspectRatio=True,
+            mask="auto"
+        )
 
-    # Timbre imagen
+    # TIMBRE (rotado, mismo tamaño)
+    timbre_path = os.path.join(assets_dir, medico.get("timbre", ""))
     if os.path.exists(timbre_path):
-        elements.append(Image(timbre_path, width=110, height=110))
-        elements.append(Spacer(1, 10))
 
-    # =========================
-    # PIE PROFESIONAL
-    # =========================
+        c.saveState()
 
-    elements.append(Spacer(1, 10))
+        timbre_x = width/2 + 95
+        timbre_y = baseY + 35
+        timbre_width = 95
+        timbre_height = 95
 
-    elements.append(Paragraph(
-        f"<b>{medico.get('name','')}</b>",
-        ParagraphStyle(
-            'NombreMedico',
-            parent=styles['Normal'],
-            alignment=TA_CENTER
+        c.translate(
+            timbre_x + timbre_width / 2,
+            timbre_y + timbre_height / 2
         )
-    ))
 
-    elements.append(Paragraph(
-        medico.get("specialty",""),
-        ParagraphStyle(
-            'Especialidad',
-            parent=styles['Normal'],
-            alignment=TA_CENTER
-        )
-    ))
+        c.rotate(-20)
 
-    elements.append(Paragraph(
-        "INSTITUTO DE CIRUGÍA ARTICULAR",
-        ParagraphStyle(
-            'Instituto',
-            parent=styles['Normal'],
-            alignment=TA_CENTER
+        c.drawImage(
+            ImageReader(timbre_path),
+            -timbre_width / 2,
+            -timbre_height / 2,
+            width=timbre_width,
+            height=timbre_height,
+            preserveAspectRatio=True,
+            mask="auto"
         )
-    ))
+
+        c.restoreState()
 
     # =========================
-    # BUILD
+    # LÍNEA Y NOMBRE PROFESIONAL
     # =========================
 
-    doc.build(elements)
+    c.setFont("Helvetica", 11)
 
-    buffer.seek(0)
-    return buffer
+    c.drawCentredString(width/2, baseY, "_____________________________________")
+    c.drawCentredString(width/2, baseY - 16, medico.get("name", ""))
+    c.drawCentredString(width/2, baseY - 30, medico.get("specialty", ""))
+    c.drawCentredString(width/2, baseY - 44, "INSTITUTO DE CIRUGÍA ARTICULAR")
+
+    c.showPage()
+    c.save()
