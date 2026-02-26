@@ -1,5 +1,3 @@
-# Documentospdf/orden kinesica.py
-
 import os
 from datetime import datetime, date
 from reportlab.lib.pagesizes import A4
@@ -32,8 +30,8 @@ def generarOrdenKinesiologia(buffer, datos):
     nombre_completo = f"{nombre} {apellido_paterno} {apellido_materno}".strip()
 
     rut = datos.get("rut", "")
-    diagnostico = datos.get("diagnostico", "")
-    texto_rp = datos.get("indicaciones", "")
+    diagnostico = datos.get("diagnostico", "")  # ✔ correcto
+    texto_rp = datos.get("indicaciones", "")    # ✔ correcto
     professional = datos.get("professional")
 
     edad = datos.get("edad")
@@ -61,7 +59,7 @@ def generarOrdenKinesiologia(buffer, datos):
     assets_dir = os.path.abspath(os.path.join(current_dir, "..", "assets"))
 
     # =========================
-    # LOGO (alineación fina, mismo tamaño)
+    # LOGO (NO SE MUEVE)
     # =========================
 
     logo_path = os.path.join(assets_dir, "ica.jpg")
@@ -69,7 +67,7 @@ def generarOrdenKinesiologia(buffer, datos):
         c.drawImage(
             ImageReader(logo_path),
             60,
-            height - 155,  # pequeño ajuste vertical
+            height - 155,
             width=110,
             height=110,
             preserveAspectRatio=True,
@@ -77,7 +75,7 @@ def generarOrdenKinesiologia(buffer, datos):
         )
 
     # =========================
-    # ENCABEZADO (mejor centrado visual)
+    # ENCABEZADO (MISMA POSICIÓN)
     # =========================
 
     c.setFont("Helvetica-Bold", 14)
@@ -85,13 +83,14 @@ def generarOrdenKinesiologia(buffer, datos):
 
     c.setFont("Helvetica-Bold", 16)
     c.drawString(200, height - 78, "ORDEN KINESICA")
+
     c.setFont("Helvetica-Bold", 12)
-    c.drawString(200, height - 78, "10 SESIONES")
+    c.drawString(200, height - 95, "10 SESIONES")  # ✔ evita sobreposición
 
     y = height - 170
 
     # =========================
-    # DATOS PACIENTE (espaciado más armónico)
+    # DATOS PACIENTE
     # =========================
 
     c.setFont("Helvetica", 12)
@@ -127,12 +126,11 @@ def generarOrdenKinesiologia(buffer, datos):
         c.drawString(75, y, "____________________________")
 
     # =========================
-    # FIRMA Y TIMBRE
+    # FIRMA Y TIMBRE (NO SE MUEVEN)
     # =========================
 
     baseY = 110
 
-    # FIRMA (misma posición, pequeño ajuste visual)
     firma_path = os.path.join(assets_dir, medico.get("firma", ""))
     if os.path.exists(firma_path):
         c.drawImage(
@@ -145,7 +143,6 @@ def generarOrdenKinesiologia(buffer, datos):
             mask="auto"
         )
 
-    # TIMBRE (rotado, mismo tamaño)
     timbre_path = os.path.join(assets_dir, medico.get("timbre", ""))
     if os.path.exists(timbre_path):
 
@@ -176,7 +173,7 @@ def generarOrdenKinesiologia(buffer, datos):
         c.restoreState()
 
     # =========================
-    # LÍNEA Y NOMBRE PROFESIONAL
+    # NOMBRE PROFESIONAL
     # =========================
 
     c.setFont("Helvetica", 11)
