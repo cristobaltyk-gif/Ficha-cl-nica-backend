@@ -1,4 +1,4 @@
-# Documentospdf/recetaMedica.py
+# Documentospdf/Examenes.py
 
 import os
 from datetime import datetime, date
