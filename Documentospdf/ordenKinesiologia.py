@@ -1,127 +1,190 @@
-# Documentospdf/ordenKinesiologia.py
+# Documentospdf/orden kinesica.py
 
 import os
-from io import BytesIO
-
-from reportlab.platypus import (
-    SimpleDocTemplate,
-    Paragraph,
-    Spacer,
-    Image
-)
-from reportlab.lib.styles import getSampleStyleSheet
+from datetime import datetime, date
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.units import inch
-
+from reportlab.pdfgen import canvas
+from reportlab.lib.utils import ImageReader
 from Documentospdf.professionalResolver import getProfessionalData
 
 
-def generarOrdenKinesiologia(datos: dict):
+def calcular_edad(fecha_nacimiento_str):
+    try:
+        nacimiento = datetime.strptime(fecha_nacimiento_str, "%Y-%m-%d").date()
+        hoy = date.today()
+        return hoy.year - nacimiento.year - (
+            (hoy.month, hoy.day) < (nacimiento.month, nacimiento.day)
+        )
+    except:
+        return ""
 
-    buffer = BytesIO()
 
-    doc = SimpleDocTemplate(
-        buffer,
-        pagesize=A4,
-        rightMargin=50,
-        leftMargin=50,
-        topMargin=80,
-        bottomMargin=80
-    )
+def generarRecetaMedica(buffer, datos):
 
-    elements = []
-    styles = getSampleStyleSheet()
+    # =========================
+    # PACIENTE
+    # =========================
 
-    nombre = datos.get("nombre")
-    edad = datos.get("edad")
-    rut = datos.get("rut")
-    diagnostico = datos.get("diagnostico")
-    lado = datos.get("lado")
-    indicaciones = datos.get("indicaciones")
+    nombre = datos.get("nombre", "")
+    apellido_paterno = datos.get("apellido_paterno", "")
+    apellido_materno = datos.get("apellido_materno", "")
+
+    nombre_completo = f"{nombre} {apellido_paterno} {apellido_materno}".strip()
+
+    rut = datos.get("rut", "")
+    diagnostico = datos.get("diagnostico", "")
+    texto_rp = datos.get("indicaciones", "")
     professional = datos.get("professional")
 
-    medico = getProfessionalData(professional)
+    edad = datos.get("edad")
+    if not edad and datos.get("fecha_nacimiento"):
+        edad = calcular_edad(datos.get("fecha_nacimiento"))
+    if not edad:
+        edad = ""
 
+    # =========================
+    # PROFESIONAL
+    # =========================
+
+    medico = getProfessionalData(professional)
     if not medico:
         raise Exception("Profesional no encontrado")
 
-    assets_dir = os.path.join(os.path.dirname(__file__), "assets")
+    # =========================
+    # CANVAS
+    # =========================
 
-    # ================= ENCABEZADO =================
+    c = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
+
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    assets_dir = os.path.abspath(os.path.join(current_dir, "..", "assets"))
+
+    # =========================
+    # LOGO (alineación fina, mismo tamaño)
+    # =========================
+
     logo_path = os.path.join(assets_dir, "ica.jpg")
     if os.path.exists(logo_path):
-        elements.append(Image(logo_path, width=120, height=50))
-        elements.append(Spacer(1, 12))
+        c.drawImage(
+            ImageReader(logo_path),
+            60,
+            height - 155,  # pequeño ajuste vertical
+            width=110,
+            height=110,
+            preserveAspectRatio=True,
+            mask="auto"
+        )
 
-    elements.append(Paragraph(
-        "<b>INSTITUTO DE CIRUGÍA ARTICULAR</b>",
-        styles["Heading1"]
-    ))
-    elements.append(Spacer(1, 6))
+    # =========================
+    # ENCABEZADO (mejor centrado visual)
+    # =========================
 
-    elements.append(Paragraph(
-        "<u>ORDEN DE ATENCIÓN KINÉSICA</u>",
-        styles["Heading2"]
-    ))
-    elements.append(Spacer(1, 24))
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(200, height - 55, "INSTITUTO DE CIRUGÍA ARTICULAR")
 
-    # ================= DATOS PACIENTE =================
-    elements.append(Paragraph(f"<b>Nombre:</b> {nombre or ''}", styles["Normal"]))
-    elements.append(Spacer(1, 8))
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(200, height - 78, "ORDEN KINESICA")
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(200, height - 78, "10 SESIONES")
 
-    elements.append(Paragraph(f"<b>Edad:</b> {edad or ''}", styles["Normal"]))
-    elements.append(Spacer(1, 6))
+    y = height - 170
 
-    elements.append(Paragraph(f"<b>RUT:</b> {rut or ''}", styles["Normal"]))
-    elements.append(Spacer(1, 6))
+    # =========================
+    # DATOS PACIENTE (espaciado más armónico)
+    # =========================
 
-    elements.append(Paragraph(
-        f"<b>Diagnóstico:</b> {(diagnostico or '')} {(lado or '')}",
-        styles["Normal"]
-    ))
-    elements.append(Spacer(1, 24))
+    c.setFont("Helvetica", 12)
 
-    # ================= ORDEN =================
-    elements.append(Paragraph(
-        "<b><font size=16>10 SESIONES DE KINESIOTERAPIA</font></b>",
-        styles["Normal"]
-    ))
-    elements.append(Spacer(1, 24))
+    c.drawString(60, y, f"Nombre: {nombre_completo}")
+    y -= 28
 
-    if indicaciones:
-        elements.append(Paragraph("<b>Indicaciones:</b>", styles["Heading3"]))
-        elements.append(Spacer(1, 6))
-        elements.append(Paragraph(indicaciones, styles["Normal"]))
-        elements.append(Spacer(1, 20))
+    c.drawString(60, y, f"Edad: {edad}")
+    y -= 28
 
-    elements.append(Spacer(1, 40))
+    c.drawString(60, y, f"RUT: {rut}")
+    y -= 28
 
-    # ================= FIRMA =================
-    elements.append(Paragraph("______________________________", styles["Normal"]))
-    elements.append(Spacer(1, 6))
-    elements.append(Paragraph("Firma y Timbre Médico", styles["Normal"]))
-    elements.append(Spacer(1, 12))
+    c.drawString(60, y, f"Diagnóstico: {diagnostico}")
+    y -= 45
 
-    # Firma
+    # =========================
+    # Rp.
+    # =========================
+
+    c.setFont("Helvetica-Bold", 18)
+    c.drawString(60, y, "Rp.")
+    y -= 55
+
+    c.setFont("Helvetica", 13)
+
+    if texto_rp:
+        text_obj = c.beginText(75, y)
+        text_obj.setLeading(18)
+        text_obj.textLines(texto_rp)
+        c.drawText(text_obj)
+    else:
+        c.drawString(75, y, "____________________________")
+
+    # =========================
+    # FIRMA Y TIMBRE
+    # =========================
+
+    baseY = 110
+
+    # FIRMA (misma posición, pequeño ajuste visual)
     firma_path = os.path.join(assets_dir, medico.get("firma", ""))
     if os.path.exists(firma_path):
-        elements.append(Image(firma_path, width=200, height=60))
-        elements.append(Spacer(1, 12))
+        c.drawImage(
+            ImageReader(firma_path),
+            width/2 - 110,
+            baseY + 30,
+            width=220,
+            height=85,
+            preserveAspectRatio=True,
+            mask="auto"
+        )
 
-    # Timbre
+    # TIMBRE (rotado, mismo tamaño)
     timbre_path = os.path.join(assets_dir, medico.get("timbre", ""))
     if os.path.exists(timbre_path):
-        elements.append(Image(timbre_path, width=100, height=100))
-        elements.append(Spacer(1, 12))
 
-    # ================= PIE =================
-    elements.append(Spacer(1, 12))
-    elements.append(Paragraph(f"<b>{medico.get('nombre','')}</b>", styles["Normal"]))
-    elements.append(Paragraph(f"RUT: {medico.get('rut','')}", styles["Normal"]))
-    elements.append(Paragraph(medico.get("especialidad",""), styles["Normal"]))
-    elements.append(Paragraph("INSTITUTO DE CIRUGÍA ARTICULAR", styles["Normal"]))
+        c.saveState()
 
-    doc.build(elements)
+        timbre_x = width/2 + 95
+        timbre_y = baseY + 35
+        timbre_width = 95
+        timbre_height = 95
 
-    buffer.seek(0)
-    return buffer
+        c.translate(
+            timbre_x + timbre_width / 2,
+            timbre_y + timbre_height / 2
+        )
+
+        c.rotate(-20)
+
+        c.drawImage(
+            ImageReader(timbre_path),
+            -timbre_width / 2,
+            -timbre_height / 2,
+            width=timbre_width,
+            height=timbre_height,
+            preserveAspectRatio=True,
+            mask="auto"
+        )
+
+        c.restoreState()
+
+    # =========================
+    # LÍNEA Y NOMBRE PROFESIONAL
+    # =========================
+
+    c.setFont("Helvetica", 11)
+
+    c.drawCentredString(width/2, baseY, "_____________________________________")
+    c.drawCentredString(width/2, baseY - 16, medico.get("name", ""))
+    c.drawCentredString(width/2, baseY - 30, medico.get("specialty", ""))
+    c.drawCentredString(width/2, baseY - 44, "INSTITUTO DE CIRUGÍA ARTICULAR")
+
+    c.showPage()
+    c.save()
