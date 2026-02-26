@@ -37,13 +37,12 @@ def build_response(buffer: BytesIO, filename: str):
 @router.post("/receta")
 async def receta(
     body: dict,
-    auth = Depends(require_internal_auth)
+    auth=Depends(require_internal_auth)
 ):
 
     professional = auth["professional"]
 
     buffer = BytesIO()
-
     body["professional"] = professional
 
     generarRecetaMedica(buffer, body)
@@ -58,12 +57,15 @@ async def receta(
 @router.post("/informe")
 async def informe(
     body: dict,
-    auth = Depends(require_internal_auth)
+    auth=Depends(require_internal_auth)
 ):
 
     professional = auth["professional"]
 
-    buffer = generar_informe_pdf(body, professional)
+    buffer = BytesIO()
+    body["professional"] = professional
+
+    generar_informe_pdf(buffer, body)
 
     return build_response(buffer, "informe_medico")
 
@@ -75,14 +77,15 @@ async def informe(
 @router.post("/kinesiologia")
 async def kinesiologia(
     body: dict,
-    auth = Depends(require_internal_auth)
+    auth=Depends(require_internal_auth)
 ):
 
     professional = auth["professional"]
 
+    buffer = BytesIO()
     body["professional"] = professional
 
-    buffer = generarOrdenKinesiologia(body)
+    generarOrdenKinesiologia(buffer, body)
 
     return build_response(buffer, "orden_kinesiologia")
 
@@ -94,16 +97,18 @@ async def kinesiologia(
 @router.post("/quirurgica")
 async def quirurgica(
     body: dict,
-    auth = Depends(require_internal_auth)
+    auth=Depends(require_internal_auth)
 ):
 
     professional = auth["professional"]
 
+    buffer = BytesIO()
     body["professional"] = professional
 
-    buffer = generarOrdenQuirurgica(body)
+    generarOrdenQuirurgica(buffer, body)
 
     return build_response(buffer, "orden_quirurgica")
+
 
 # =====================================================
 # ORDEN DE EXÁMENES
@@ -112,13 +117,12 @@ async def quirurgica(
 @router.post("/examenes")
 async def examenes(
     body: dict,
-    auth = Depends(require_internal_auth)
+    auth=Depends(require_internal_auth)
 ):
 
     professional = auth["professional"]
 
     buffer = BytesIO()
-
     body["professional"] = professional
 
     generarOrdenExamenes(buffer, body)
