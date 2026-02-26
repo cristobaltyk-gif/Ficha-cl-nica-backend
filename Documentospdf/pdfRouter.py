@@ -8,6 +8,7 @@ from Documentospdf.recetaMedica import generarRecetaMedica
 from Documentospdf.informeMedico import generar_informe_pdf
 from Documentospdf.ordenKinesiologia import generarOrdenKinesiologia
 from Documentospdf.ordenQuirurgica import generarOrdenQuirurgica
+from Documentospdf.Examenes import generarOrdenExamenes
 
 
 router = APIRouter(
@@ -103,3 +104,23 @@ async def quirurgica(
     buffer = generarOrdenQuirurgica(body)
 
     return build_response(buffer, "orden_quirurgica")
+
+# =====================================================
+# ORDEN DE EXÁMENES
+# =====================================================
+
+@router.post("/examenes")
+async def examenes(
+    body: dict,
+    auth = Depends(require_internal_auth)
+):
+
+    professional = auth["professional"]
+
+    buffer = BytesIO()
+
+    body["professional"] = professional
+
+    generarOrdenExamenes(buffer, body)
+
+    return build_response(buffer, "orden_examenes")
