@@ -33,7 +33,7 @@ def generarOrdenExamenes(buffer, datos):
 
     rut = datos.get("rut", "")
     diagnostico = datos.get("diagnostico", "")
-    texto_rp = datos.get("indicaciones", "")
+    texto_rp = datos.get("examenes", "")
     professional = datos.get("professional")
 
     edad = datos.get("edad")
