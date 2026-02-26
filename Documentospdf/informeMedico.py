@@ -19,7 +19,7 @@ def calcular_edad(fecha_nacimiento_str):
         return ""
 
 
-def generarRecetaMedica(buffer, datos):
+def generar_informe_pdf(buffer, datos):
 
     # =========================
     # PACIENTE
