@@ -18,8 +18,8 @@ BASE_DATA_PATH = Path("/data/pacientes")
 LOCK = Lock()
 
 router = APIRouter(
-    prefix="/api/fichas/clinica",
-    tags=["Ficha Clínica - Create"],
+    prefix="/api/fichas/evento",
+    tags=["Ficha Clínica - Evento"],
     dependencies=[Depends(require_internal_auth)]
 )
 
@@ -36,22 +36,20 @@ def patient_dir(rut: str) -> Path:
     return BASE_DATA_PATH / rut
 
 
-def events_dir(rut: str) -> Path:
-    return patient_dir(rut) / "eventos"
-
-
 # ===============================
-# CREATE EVENTO CLÍNICO
+# GUARDAR EVENTO CLÍNICO
 # ===============================
 
 @router.post("")
-def create_ficha_clinica(
+def save_clinical_event(
     data: Dict[str, Any],
     user=Depends(require_internal_auth)
 ):
     """
-    CREA evento clínico dentro de /data/pacientes/{rut}/eventos/
-    EXACTAMENTE con el contrato del frontend.
+    Guarda un JSON clínico dentro de la carpeta del paciente.
+    No crea ficha.
+    No modifica admin.
+    Solo agrega un evento.
     """
 
     required = ["rut", "fecha", "hora"]
@@ -66,34 +64,32 @@ def create_ficha_clinica(
     rut = data["rut"]
 
     with LOCK:
-        patient_path = patient_dir(rut)
+        pdir = patient_dir(rut)
 
-        if not patient_path.exists():
+        if not pdir.exists():
             raise HTTPException(
                 status_code=404,
-                detail="Paciente no tiene ficha administrativa"
+                detail="La ficha del paciente no existe"
             )
 
-        edir = events_dir(rut)
-        edir.mkdir(exist_ok=True)
+        events_dir = pdir / "eventos"
+        events_dir.mkdir(exist_ok=True)
 
         filename = f"{data['fecha']}_{data['hora'].replace(':','-')}.json"
-        file = edir / filename
+        file = events_dir / filename
 
         if file.exists():
             raise HTTPException(
                 status_code=409,
-                detail="Ya existe evento clínico en esa fecha y hora"
+                detail="Ya existe una atención en esa fecha y hora"
             )
 
-        # Mantener exactamente los campos del frontend
         evento = data.copy()
 
         # Trazabilidad profesional
         evento["professional_id"] = user["usuario"]
         evento["professional_name"] = user["role"]["name"]
         evento["created_at"] = utc_now()
-        evento["version"] = 1
 
         file.write_text(
             json.dumps(evento, indent=2, ensure_ascii=False),
@@ -103,4 +99,4 @@ def create_ficha_clinica(
     return {
         "status": "ok",
         "rut": rut
-  }
+    }
