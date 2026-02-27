@@ -3,11 +3,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from threading import Lock
-from datetime import datetime, timezone
-from typing import Dict, Any
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Depends
+
 from auth.internal_auth import require_internal_auth
+from modules.fichas.ficha_evento_schema import FichaEventoCreate
 
 
 # ===============================
@@ -28,8 +30,11 @@ router = APIRouter(
 # HELPERS
 # ===============================
 
-def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+def chile_now() -> str:
+    """
+    Fecha y hora oficial Chile
+    """
+    return datetime.now(ZoneInfo("America/Santiago")).isoformat()
 
 
 def patient_dir(rut: str) -> Path:
@@ -42,26 +47,19 @@ def patient_dir(rut: str) -> Path:
 
 @router.post("")
 def save_clinical_event(
-    data: Dict[str, Any],
+    data: FichaEventoCreate,
     user=Depends(require_internal_auth)
 ):
     """
-    Guarda un JSON clínico dentro de la carpeta del paciente.
-    No crea ficha.
-    No modifica admin.
-    Solo agrega un evento.
+    Guarda un JSON clínico dentro de:
+    /data/pacientes/{rut}/eventos/
+
+    - No crea ficha administrativa
+    - No modifica admin.json
+    - Solo agrega una atención
     """
 
-    required = ["rut", "fecha", "hora"]
-
-    for field in required:
-        if field not in data or not data[field]:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Campo obligatorio faltante: {field}"
-            )
-
-    rut = data["rut"]
+    rut = data.rut
 
     with LOCK:
         pdir = patient_dir(rut)
@@ -75,7 +73,7 @@ def save_clinical_event(
         events_dir = pdir / "eventos"
         events_dir.mkdir(exist_ok=True)
 
-        filename = f"{data['fecha']}_{data['hora'].replace(':','-')}.json"
+        filename = f"{data.fecha}_{data.hora.replace(':','-')}.json"
         file = events_dir / filename
 
         if file.exists():
@@ -84,12 +82,15 @@ def save_clinical_event(
                 detail="Ya existe una atención en esa fecha y hora"
             )
 
-        evento = data.copy()
+        # Datos clínicos (exactamente tu esquema)
+        evento = data.dict()
 
-        # Trazabilidad profesional
+        # Profesional desde auth (NO desde frontend)
         evento["professional_id"] = user["usuario"]
         evento["professional_name"] = user["role"]["name"]
-        evento["created_at"] = utc_now()
+
+        # Timestamp Chile oficial
+        evento["created_at"] = chile_now()
 
         file.write_text(
             json.dumps(evento, indent=2, ensure_ascii=False),
