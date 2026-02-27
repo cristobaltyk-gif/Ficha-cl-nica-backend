@@ -21,7 +21,7 @@ from Documentospdf.pdfRouter import router as pdf_router
 from modules.fichas.ficha_evento_create import router as ficha_evento_create_router
 from modules.fichas.ficha_evento_read import router as ficha_evento_read_router
 from modules.fichas.ficha_evento_update import router as ficha_evento_update_router
-
+from modules.fichas.ficha_evento_list import router as ficha_evento_list_router
 # ==========================
 # APP CORE
 # ==========================
@@ -76,6 +76,7 @@ app.include_router(ficha_update_router)
 app.include_router(ficha_evento_create_router)
 app.include_router(ficha_evento_read_router)
 app.include_router(ficha_evento_update_router)
+app.include_router(ficha_evento_list_router)
 
 # 🤖 GPT clínico
 app.include_router(gpt_clinical_router)
