@@ -18,7 +18,9 @@ from modules.fichas.ficha_read import router as ficha_read_router
 from modules.fichas.ficha_update import router as ficha_update_router
 from api.gpt_clinical import router as gpt_clinical_router
 from Documentospdf.pdfRouter import router as pdf_router
-
+from modules.fichas.ficha_evento_create import router as ficha_evento_create_router
+from modules.fichas.ficha_evento_read import router as ficha_evento_read_router
+from modules.fichas.ficha_evento_update import router as ficha_evento_update_router
 
 # ==========================
 # APP CORE
@@ -71,6 +73,9 @@ app.include_router(professionals_admin_router)
 app.include_router(ficha_create_router)
 app.include_router(ficha_read_router)
 app.include_router(ficha_update_router)
+app.include_router(ficha_evento_create_router)
+app.include_router(ficha_evento_read_router)
+app.include_router(ficha_evento_update_router)
 
 # 🤖 GPT clínico
 app.include_router(gpt_clinical_router)
