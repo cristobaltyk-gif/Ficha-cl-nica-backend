@@ -23,6 +23,7 @@ from modules.fichas.ficha_evento_read import router as ficha_evento_read_router
 from modules.fichas.ficha_evento_update import router as ficha_evento_update_router
 from modules.fichas.ficha_evento_list import router as ficha_evento_list_router
 from modules.fichas.ficha_evento_resumen_global import router as ficha_evento_resumen_router
+from api.gpt_summary import router as gpt_summary_router
 
 # ==========================
 # APP CORE
@@ -83,6 +84,7 @@ app.include_router(ficha_evento_resumen_router)
 
 # 🤖 GPT clínico
 app.include_router(gpt_clinical_router)
+app.include_router(gpt_summary_router)
 
 # 🧾 PDF
 app.include_router(pdf_router)
