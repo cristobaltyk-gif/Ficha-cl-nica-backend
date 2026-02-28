@@ -4,10 +4,15 @@ import json
 from pathlib import Path
 from typing import List, Dict, Any
 
+import httpx
 from fastapi import APIRouter, HTTPException, Depends
 
 from auth.internal_auth import require_internal_auth
-from api.openai_client import ask_gpt  # 👈 usa tu cliente real OpenAI
+
+
+# ===============================
+# CONFIG
+# ===============================
 
 BASE_DATA_PATH = Path("/data/pacientes")
 
@@ -18,9 +23,17 @@ router = APIRouter(
 )
 
 
+# ===============================
+# HELPERS
+# ===============================
+
 def patient_dir(rut: str) -> Path:
     return BASE_DATA_PATH / rut
 
+
+# ===============================
+# ENDPOINT
+# ===============================
 
 @router.post("/{rut}")
 async def generar_resumen_clinico(
@@ -29,7 +42,8 @@ async def generar_resumen_clinico(
 ):
     """
     Lee TODAS las atenciones clínicas del paciente
-    y genera un resumen clínico integral en 1 página.
+    y genera un resumen clínico integral en 1 página
+    usando el endpoint GPT oficial.
     """
 
     pdir = patient_dir(rut)
@@ -43,72 +57,79 @@ async def generar_resumen_clinico(
     events_dir = pdir / "eventos"
 
     if not events_dir.exists():
-        return {"resumen": "Paciente sin atenciones registradas."}
+        return {
+            "rut": rut,
+            "resumen": "Paciente sin atenciones registradas."
+        }
 
-    eventos = []
+    eventos: List[Dict[str, Any]] = []
 
+    # 🔹 Lee TODOS los JSON
     for file in sorted(events_dir.glob("*.json")):
         try:
-            contenido = json.loads(file.read_text(encoding="utf-8"))
+            contenido = json.loads(
+                file.read_text(encoding="utf-8")
+            )
             eventos.append(contenido)
         except Exception:
             continue
 
     if not eventos:
-        return {"resumen": "Paciente sin atenciones registradas."}
+        return {
+            "rut": rut,
+            "resumen": "Paciente sin atenciones registradas."
+        }
 
     # ===============================
-    # CONSTRUIR CONTEXTO PARA GPT
+    # CONSTRUIR HISTORIAL COMPLETO
     # ===============================
 
     historial_texto = ""
 
     for ev in eventos:
         historial_texto += f"""
-Fecha: {ev.get("fecha")}
-Hora: {ev.get("hora")}
-Profesional: {ev.get("professional_name")}
+Fecha: {ev.get("fecha", "")}
+Hora: {ev.get("hora", "")}
+Profesional: {ev.get("professional_name", "")}
 
 Motivo Consulta:
-{ev.get("atencion")}
+{ev.get("atencion", "")}
 
 Diagnóstico:
-{ev.get("diagnostico")}
+{ev.get("diagnostico", "")}
 
 Exámenes:
-{ev.get("examenes")}
+{ev.get("examenes", "")}
 
 Indicaciones:
-{ev.get("indicaciones")}
+{ev.get("indicaciones", "")}
 
 Plan:
-{ev.get("receta")}
+{ev.get("receta", "")}
 
-----------------------------------------
+------------------------------------------------------------
 """
 
-    prompt = f"""
-Eres un traumatólogo experto.
+    # ===============================
+    # LLAMAR A GPT SUMMARY ENDPOINT
+    # ===============================
 
-Redacta un resumen clínico integral en máximo una página,
-lenguaje médico formal, claro y estructurado.
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            "http://localhost:8000/api/gpt/clinical-summary",
+            json={"historial": historial_texto},
+            headers={
+                "X-Internal-User": user["usuario"]
+            }
+        )
 
-Incluye:
-- Antecedentes relevantes
-- Evolución clínica
-- Diagnósticos principales
-- Estudios realizados
-- Conducta actual
+    if response.status_code != 200:
+        raise HTTPException(
+            status_code=500,
+            detail="Error generando resumen clínico"
+        )
 
-No inventes datos.
-Usa solo la información entregada.
-
-HISTORIAL DEL PACIENTE:
-
-{historial_texto}
-"""
-
-    resumen = await ask_gpt(prompt)
+    resumen = response.json().get("resumen", "")
 
     return {
         "rut": rut,
