@@ -100,12 +100,12 @@ def save_clinical_event(
        # Marcar slot como evaluado
        # ===============================
        set_slot(
-       date=data.fecha,
-       time=data.hora,
-       professional=user["usuario"],  # backend es la verdad
-       status="evaluated",
-       rut=rut
-               )
+           date=data.fecha,
+           time=data.hora,
+           professional=user["usuario"],  # backend es la verdad
+           status="evaluated",
+           rut=rut    
+       )
        return {
            "status": "ok",
            "rut": rut
