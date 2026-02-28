@@ -85,9 +85,19 @@ def save_clinical_event(
         # Datos clínicos (exactamente tu esquema)
         evento = data.dict()
 
-        # Profesional desde auth (NO desde frontend)
-        evento["professional_id"] = user["usuario"]
-        evento["professional_name"] = user["role"]["name"]
+        professional_id = user["usuario"]
+
+# Leer profesionales desde JSON real
+if not PROFESSIONALS_FILE.exists():
+    raise HTTPException(status_code=500, detail="Archivo de profesionales no encontrado")
+
+professionals = json.loads(PROFESSIONALS_FILE.read_text(encoding="utf-8"))
+
+if professional_id not in professionals:
+    raise HTTPException(status_code=403, detail="Profesional no válido")
+
+evento["professional_id"] = professional_id
+evento["professional_name"] = professionals[professional_id]["name"]
 
         # Timestamp Chile oficial
         evento["created_at"] = chile_now()
