@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException, Depends
 
 from auth.internal_auth import require_internal_auth
 from modules.fichas.ficha_evento_schema import FichaEventoCreate
-from modules.agenda.agenda_store import set_slot
+from agenda.store import set_slot
 
 # ===============================
 # CONFIG
