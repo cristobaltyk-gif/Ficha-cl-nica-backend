@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException, Depends
 
 from auth.internal_auth import require_internal_auth
 from modules.fichas.ficha_evento_schema import FichaEventoCreate
-
+from modules.agenda.agenda_store import set_slot
 
 # ===============================
 # CONFIG
@@ -96,8 +96,17 @@ def save_clinical_event(
             json.dumps(evento, indent=2, ensure_ascii=False),
             encoding="utf-8"
         )
-
-    return {
-        "status": "ok",
-        "rut": rut
-    }
+       # ===============================
+       # Marcar slot como evaluado
+       # ===============================
+       set_slot(
+       date=data.fecha,
+       time=data.hora,
+       professional=user["usuario"],  # backend es la verdad
+       status="evaluated",
+       rut=rut
+               )
+       return {
+           "status": "ok",
+           "rut": rut
+       }
