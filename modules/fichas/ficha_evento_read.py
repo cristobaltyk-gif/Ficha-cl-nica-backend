@@ -57,23 +57,25 @@ def get_clinical_events(rut: str) -> List[Dict[str, Any]]:
     eventos = []
 
     for file in sorted(events_dir.glob("*.json"), reverse=True):
-    try:
-        contenido = json.loads(file.read_text(encoding="utf-8"))
+        try:
+            contenido = json.loads(file.read_text(encoding="utf-8"))
 
-        # 🔥 Resolver nombre profesional
-        professional_user = contenido.get("professional_user")
+            # Resolver nombre profesional
+            professional_user = contenido.get("professional_user")
 
-        if professional_user:
-            user_data = USERS.get(professional_user)
+            if professional_user:
+                user_data = USERS.get(professional_user)
 
-            if user_data:
-                contenido["professional_name"] = (
-                    user_data.get("name") or professional_user
-                )
-            else:
-                contenido["professional_name"] = professional_user
+                if user_data:
+                    contenido["professional_name"] = (
+                        user_data.get("name") or professional_user
+                    )
+                else:
+                    contenido["professional_name"] = professional_user
 
-        eventos.append(contenido)
+            eventos.append(contenido)
 
-    except Exception:
-        continue
+        except Exception:
+            continue
+
+    return eventos  
