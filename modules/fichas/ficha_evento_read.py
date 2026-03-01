@@ -7,7 +7,8 @@ from typing import List, Dict, Any
 from fastapi import APIRouter, HTTPException, Depends
 
 from auth.internal_auth import require_internal_auth
-from auth.users_store import USERS
+from core.professionals_store import list_professionals
+
 
 # ===============================
 # CONFIG
@@ -35,11 +36,28 @@ def patient_dir(rut: str) -> Path:
 # ===============================
 
 @router.get("/{rut}")
-def get_clinical_events(rut: str) -> List[Dict[str, Any]]:
+def get_clinical_events(
+    rut: str,
+    user=Depends(require_internal_auth)
+) -> List[Dict[str, Any]]:
     """
     Devuelve todos los eventos clínicos del paciente,
     ordenados por fecha/hora descendente.
+
+    - Respeta auth interno
+    - Resuelve professional_name desde professionals_store
+    - NO usa USERS
     """
+
+    # ===============================
+    # VALIDAR ROL CLÍNICO
+    # ===============================
+    role = user.get("role", {})
+    if role.get("name") not in ["medico", "kinesiologia"]:
+        raise HTTPException(
+            status_code=403,
+            detail="No autorizado para leer ficha clínica"
+        )
 
     pdir = patient_dir(rut)
 
@@ -54,28 +72,34 @@ def get_clinical_events(rut: str) -> List[Dict[str, Any]]:
     if not events_dir.exists():
         return []
 
+    # ===============================
+    # CARGAR PROFESIONALES (FUENTE CLÍNICA)
+    # ===============================
+    professionals_list = list_professionals()
+    professionals_map = {p["id"]: p for p in professionals_list}
+
     eventos = []
 
     for file in sorted(events_dir.glob("*.json"), reverse=True):
         try:
             contenido = json.loads(file.read_text(encoding="utf-8"))
 
+            # ===============================
             # Resolver nombre profesional
-            professional_user = contenido.get("professional_user")
+            # ===============================
+            professional_id = contenido.get("professional_id")
 
-            if professional_user:
-                user_data = USERS.get(professional_user)
-
-                if user_data:
-                    contenido["professional_name"] = (
-                        user_data.get("name") or professional_user
-                    )
-                else:
-                    contenido["professional_name"] = professional_user
+            if professional_id and professional_id in professionals_map:
+                contenido["professional_name"] = (
+                    professionals_map[professional_id]["name"]
+                )
+            else:
+                # Fallback seguro
+                contenido["professional_name"] = professional_id or ""
 
             eventos.append(contenido)
 
         except Exception:
             continue
 
-    return eventos  
+    return eventos
