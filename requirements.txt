@@ -37,9 +37,14 @@ psycopg2-binary
 pytest
 
 # =========================
-# OpenAI (GPT clínico)
+# OpenAI (GPT clínico - legacy)
 # =========================
 openai>=1.0.0
+
+# =========================
+# Anthropic (Claude clínico)
+# =========================
+anthropic>=0.25.0
 
 # =========================
 # PDF generation
