@@ -9,7 +9,7 @@ router = APIRouter(prefix="/api/caja", tags=["Caja"])
 
 CAJA_DIR    = "data/caja"
 PAGOS_DIR   = "data/pagos"
-CONFIG_PATH = "caja_config.json"
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), "caja_config.json")
 
 TIPOS_VALIDOS = {
     "particular", "control_costo", "control_gratuito",
