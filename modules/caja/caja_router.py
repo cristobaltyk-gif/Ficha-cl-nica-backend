@@ -15,9 +15,9 @@ TIPOS_VALIDOS = {
     "particular", "control_costo", "control_gratuito",
     "sobrecupo", "cortesia", "kinesiologia"
 }
-TIPOS_GRATUITOS  = {"control_gratuito", "cortesia"}
-ESTADOS_VALIDOS  = {"waiting", "paid"}
-METODOS_VALIDOS  = {"efectivo", "transferencia", "tarjeta"}
+TIPOS_GRATUITOS = {"control_gratuito", "cortesia"}
+ESTADOS_VALIDOS = {"waiting", "paid"}
+METODOS_VALIDOS = {"efectivo", "transferencia", "tarjeta"}
 
 # =========================
 # HELPERS
@@ -171,7 +171,6 @@ def registrar_pago(data: PagoCreate):
     config = _load_config()
     monto  = config.get(data.tipo_atencion, 0)
 
-    # ── guardar en pagos (auditoría) ──
     pagos = _load(PAGOS_DIR, data.date, data.professional)
     pagos[data.time] = {
         "rut":              data.rut,
@@ -190,13 +189,13 @@ def registrar_pago(data: PagoCreate):
     }
     _save(PAGOS_DIR, data.date, data.professional, pagos)
 
-    # ── actualizar caja (estado visual) ──
     caja = _load(CAJA_DIR, data.date, data.professional)
     if data.time not in caja:
         caja[data.time] = {}
-    caja[data.time]["pagado"]        = True
-    caja[data.time]["tipo_atencion"] = data.tipo_atencion
-    caja[data.time]["monto"]         = monto
+    caja[data.time]["arrival_status"] = "paid"
+    caja[data.time]["pagado"]         = True
+    caja[data.time]["tipo_atencion"]  = data.tipo_atencion
+    caja[data.time]["monto"]          = monto
     _save(CAJA_DIR, data.date, data.professional, caja)
 
     return {"ok": True, "monto": monto, "es_gratuito": es_gratuito}
@@ -220,10 +219,10 @@ def anular_pago(data: AnulacionCreate):
     pagos[data.time]["anulado_por"]      = data.anulado_por
     _save(PAGOS_DIR, data.date, data.professional, pagos)
 
-    # revertir estado visual en caja
     caja = _load(CAJA_DIR, data.date, data.professional)
     if data.time in caja:
-        caja[data.time]["pagado"] = False
+        caja[data.time]["arrival_status"] = None
+        caja[data.time]["pagado"]         = False
         _save(CAJA_DIR, data.date, data.professional, caja)
 
     return {"ok": True}
