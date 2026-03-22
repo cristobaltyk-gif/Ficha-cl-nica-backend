@@ -3,13 +3,15 @@ from pydantic import BaseModel
 from typing import Optional
 import json
 import os
+from pathlib import Path
 from datetime import datetime
 
 router = APIRouter(prefix="/api/caja", tags=["Caja"])
 
-CAJA_DIR    = "data/caja"
-PAGOS_DIR   = "data/pagos"
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), "caja_config.json")
+CAJA_DIR    = Path("/data/caja")
+PAGOS_DIR   = Path("/data/pagos")
+AGENDA_PATH = Path("/data/agenda_future.json")
+CONFIG_PATH = Path(os.path.dirname(__file__)) / "caja_config.json"
 
 TIPOS_VALIDOS = {
     "particular", "control_costo", "control_gratuito",
@@ -23,34 +25,59 @@ METODOS_VALIDOS = {"efectivo", "transferencia", "tarjeta"}
 # HELPERS
 # =========================
 
-def _path(base, date, professional):
-    return os.path.join(base, date, f"{professional}.json")
+def _month_key(date: str) -> str:
+    return date[:7]  # "2026-03"
 
-def _load(base, date, professional):
-    p = _path(base, date, professional)
-    if not os.path.exists(p):
+def _caja_path(date: str) -> Path:
+    return CAJA_DIR / f"{_month_key(date)}.json"
+
+def _pagos_path(date: str) -> Path:
+    return PAGOS_DIR / f"{_month_key(date)}.json"
+
+def _load_json(path: Path) -> dict:
+    if not path.exists():
         return {}
-    with open(p, "r", encoding="utf-8") as f:
+    with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
-def _save(base, date, professional, data):
-    p = _path(base, date, professional)
-    os.makedirs(os.path.dirname(p), exist_ok=True)
-    with open(p, "w", encoding="utf-8") as f:
+def _save_json(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-def _load_config():
-    if not os.path.exists(CONFIG_PATH):
+def _load_config() -> dict:
+    if not CONFIG_PATH.exists():
         return {}
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
 
-def _load_agenda(date, professional):
-    p = os.path.join("data/agenda", date, f"{professional}.json")
-    if not os.path.exists(p):
-        return {}
-    with open(p, "r", encoding="utf-8") as f:
-        return json.load(f)
+def _load_agenda_day(date: str, professional: str) -> dict:
+    store = _load_json(AGENDA_PATH)
+    return store.get("calendar", {}).get(date, {}).get(professional, {}).get("slots", {})
+
+def _load_caja_slot(date: str, professional: str, time: str) -> dict:
+    store = _load_json(_caja_path(date))
+    return store.get(date, {}).get(professional, {}).get(time, {})
+
+def _load_caja_day(date: str, professional: str) -> dict:
+    store = _load_json(_caja_path(date))
+    return store.get(date, {}).get(professional, {})
+
+def _save_caja_slot(date: str, professional: str, time: str, slot: dict) -> None:
+    path  = _caja_path(date)
+    store = _load_json(path)
+    store.setdefault(date, {}).setdefault(professional, {})[time] = slot
+    _save_json(path, store)
+
+def _load_pagos_day(date: str, professional: str) -> dict:
+    store = _load_json(_pagos_path(date))
+    return store.get(date, {}).get(professional, {})
+
+def _save_pago(date: str, professional: str, time: str, pago: dict) -> None:
+    path  = _pagos_path(date)
+    store = _load_json(path)
+    store.setdefault(date, {}).setdefault(professional, {})[time] = pago
+    _save_json(path, store)
 
 # =========================
 # SCHEMAS
@@ -83,7 +110,7 @@ class AnulacionCreate(BaseModel):
     anulado_por:  Optional[str] = None
 
 # =========================
-# GET — config (montos)
+# GET — config
 # =========================
 
 @router.get("/config")
@@ -96,12 +123,12 @@ def get_config():
 
 @router.get("/day")
 def get_caja_day(date: str, professional: str):
-    agenda = _load_agenda(date, professional)
-    caja   = _load(CAJA_DIR, date, professional)
-    config = _load_config()
+    agenda_slots = _load_agenda_day(date, professional)
+    caja         = _load_caja_day(date, professional)
+    config       = _load_config()
 
     result = []
-    for time, slot in agenda.items():
+    for time, slot in agenda_slots.items():
         if slot.get("status") not in ("reserved", "confirmed"):
             continue
 
@@ -111,8 +138,7 @@ def get_caja_day(date: str, professional: str):
 
         result.append({
             "time":           time,
-            "rut":            slot.get("rut") or cs.get("rut", ""),
-            "patient":        slot.get("patient", {}),
+            "rut":            slot.get("rut", ""),
             "arrival_status": cs.get("arrival_status", "pending"),
             "tipo_atencion":  tipo,
             "monto":          monto,
@@ -124,7 +150,7 @@ def get_caja_day(date: str, professional: str):
     return {"date": date, "professional": professional, "slots": result}
 
 # =========================
-# PATCH — actualizar slot caja
+# PATCH — actualizar slot
 # =========================
 
 @router.patch("/slot")
@@ -134,21 +160,19 @@ def update_caja_slot(data: CajaUpdate):
     if data.tipo_atencion and data.tipo_atencion not in TIPOS_VALIDOS:
         raise HTTPException(status_code=400, detail="tipo_atencion inválido")
 
-    caja = _load(CAJA_DIR, data.date, data.professional)
-    if data.time not in caja:
-        caja[data.time] = {}
+    cs = _load_caja_slot(data.date, data.professional, data.time)
 
     if data.arrival_status is not None:
-        caja[data.time]["arrival_status"] = data.arrival_status
+        cs["arrival_status"] = data.arrival_status
     if data.tipo_atencion is not None:
-        caja[data.time]["tipo_atencion"] = data.tipo_atencion
         config = _load_config()
-        caja[data.time]["monto"]         = config.get(data.tipo_atencion, 0)
-        caja[data.time]["es_gratuito"]   = data.tipo_atencion in TIPOS_GRATUITOS
+        cs["tipo_atencion"] = data.tipo_atencion
+        cs["monto"]         = config.get(data.tipo_atencion, 0)
+        cs["es_gratuito"]   = data.tipo_atencion in TIPOS_GRATUITOS
     if data.pagado is not None:
-        caja[data.time]["pagado"] = data.pagado
+        cs["pagado"] = data.pagado
 
-    _save(CAJA_DIR, data.date, data.professional, caja)
+    _save_caja_slot(data.date, data.professional, data.time, cs)
     return {"ok": True, "time": data.time}
 
 # =========================
@@ -171,8 +195,7 @@ def registrar_pago(data: PagoCreate):
     config = _load_config()
     monto  = config.get(data.tipo_atencion, 0)
 
-    pagos = _load(PAGOS_DIR, data.date, data.professional)
-    pagos[data.time] = {
+    _save_pago(data.date, data.professional, data.time, {
         "rut":              data.rut,
         "tipo_atencion":    data.tipo_atencion,
         "monto":            monto,
@@ -186,17 +209,14 @@ def registrar_pago(data: PagoCreate):
         "anulacion_motivo": None,
         "anulacion_at":     None,
         "anulado_por":      None,
-    }
-    _save(PAGOS_DIR, data.date, data.professional, pagos)
+    })
 
-    caja = _load(CAJA_DIR, data.date, data.professional)
-    if data.time not in caja:
-        caja[data.time] = {}
-    caja[data.time]["arrival_status"] = "paid"
-    caja[data.time]["pagado"]         = True
-    caja[data.time]["tipo_atencion"]  = data.tipo_atencion
-    caja[data.time]["monto"]          = monto
-    _save(CAJA_DIR, data.date, data.professional, caja)
+    cs = _load_caja_slot(data.date, data.professional, data.time)
+    cs["arrival_status"] = "paid"
+    cs["pagado"]         = True
+    cs["tipo_atencion"]  = data.tipo_atencion
+    cs["monto"]          = monto
+    _save_caja_slot(data.date, data.professional, data.time, cs)
 
     return {"ok": True, "monto": monto, "es_gratuito": es_gratuito}
 
@@ -206,7 +226,7 @@ def registrar_pago(data: PagoCreate):
 
 @router.post("/anular")
 def anular_pago(data: AnulacionCreate):
-    pagos = _load(PAGOS_DIR, data.date, data.professional)
+    pagos = _load_pagos_day(data.date, data.professional)
 
     if data.time not in pagos:
         raise HTTPException(status_code=404, detail="Pago no encontrado")
@@ -217,13 +237,16 @@ def anular_pago(data: AnulacionCreate):
     pagos[data.time]["anulacion_motivo"] = data.motivo
     pagos[data.time]["anulacion_at"]     = datetime.now().isoformat(timespec="seconds")
     pagos[data.time]["anulado_por"]      = data.anulado_por
-    _save(PAGOS_DIR, data.date, data.professional, pagos)
 
-    caja = _load(CAJA_DIR, data.date, data.professional)
-    if data.time in caja:
-        caja[data.time]["arrival_status"] = None
-        caja[data.time]["pagado"]         = False
-        _save(CAJA_DIR, data.date, data.professional, caja)
+    path  = _pagos_path(data.date)
+    store = _load_json(path)
+    store.setdefault(data.date, {}).setdefault(data.professional, {})[data.time] = pagos[data.time]
+    _save_json(path, store)
+
+    cs = _load_caja_slot(data.date, data.professional, data.time)
+    cs["arrival_status"] = None
+    cs["pagado"]         = False
+    _save_caja_slot(data.date, data.professional, data.time, cs)
 
     return {"ok": True}
 
@@ -235,7 +258,7 @@ def anular_pago(data: AnulacionCreate):
 def get_caja_summary(date: str, professional: str):
     day   = get_caja_day(date, professional)
     slots = day["slots"]
-    pagos = _load(PAGOS_DIR, date, professional)
+    pagos = _load_pagos_day(date, professional)
 
     total_pacientes = len(slots)
     esperando       = sum(1 for s in slots if s["arrival_status"] == "waiting" and not s["pagado"])
@@ -262,3 +285,4 @@ def get_caja_summary(date: str, professional: str):
         "por_tipo":        por_tipo,
         "por_metodo":      por_metodo,
     }
+    
