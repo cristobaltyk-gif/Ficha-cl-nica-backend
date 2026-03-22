@@ -83,6 +83,14 @@ class AnulacionCreate(BaseModel):
     anulado_por:  Optional[str] = None
 
 # =========================
+# GET — config (montos)
+# =========================
+
+@router.get("/config")
+def get_config():
+    return _load_config()
+
+# =========================
 # GET — panel del día
 # =========================
 
