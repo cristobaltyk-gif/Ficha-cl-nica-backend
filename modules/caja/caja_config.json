@@ -1,6 +1,8 @@
 {
-  "particular": 35000,
-  "control":    15000,
-  "cortesia":   0,
-  "sobrecupo":  20000
+  "particular":       45000,
+  "control_costo":    45000,
+  "control_gratuito": 0,
+  "sobrecupo":        45000,
+  "cortesia":         0,
+  "kinesiologia":     25000
 }
