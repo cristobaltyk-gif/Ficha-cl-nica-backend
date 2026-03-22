@@ -8,10 +8,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from auth.auth_service import login_router
 
-from core.professionals_router import router as professionals_router  # 👨‍⚕️ GLOBAL
+from core.professionals_router import router as professionals_router
 
-from agenda.router import router as agenda_router  # 📅 Agenda diaria
-from agenda.summary_router import router as agenda_summary_router  # 📅 Resumen mensual/semanal
+from agenda.router import router as agenda_router
+from agenda.summary_router import router as agenda_summary_router
 from agenda.professionals_router import router as professionals_admin_router
 from modules.fichas.ficha_create import router as ficha_create_router
 from modules.fichas.ficha_read import router as ficha_read_router
@@ -25,7 +25,7 @@ from modules.fichas.ficha_evento_list import router as ficha_evento_list_router
 from modules.fichas.ficha_evento_resumen_clinico import router as ficha_evento_resumen_clinico_router
 from api.gpt_summary import router as gpt_summary_router
 from api.claude_router import router as claude_clinical_router
-
+from modules.caja.caja_router import router as caja_router
 
 # ==========================
 # APP CORE
@@ -64,13 +64,13 @@ app.add_middleware(
 # 🔐 Auth
 app.include_router(login_router)
 
-# 👨‍⚕️ Profesionales globales (ADMIN)
+# 👨‍⚕️ Profesionales globales
 app.include_router(professionals_router)
 
 # 📅 Agenda diaria
 app.include_router(agenda_router)
 
-# 📅 Agenda resumen (calendario mensual/semanal)
+# 📅 Agenda resumen
 app.include_router(agenda_summary_router)
 
 app.include_router(professionals_admin_router)
@@ -84,11 +84,15 @@ app.include_router(ficha_evento_update_router)
 app.include_router(ficha_evento_list_router)
 app.include_router(ficha_evento_resumen_clinico_router)
 
-# 🤖 GPT clínico
+# 🤖 GPT clínico (legacy)
 app.include_router(gpt_clinical_router)
 app.include_router(gpt_summary_router)
 
+# 🤖 Claude clínico
 app.include_router(claude_clinical_router)
+
+# 💰 Caja
+app.include_router(caja_router)
 
 # 🧾 PDF
 app.include_router(pdf_router)
@@ -106,6 +110,8 @@ def root():
             "auth",
             "professionals",
             "agenda",
-            "agenda-summary"
+            "agenda-summary",
+            "caja"
         ]
     }
+    
