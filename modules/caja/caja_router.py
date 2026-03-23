@@ -26,7 +26,7 @@ METODOS_VALIDOS = {"efectivo", "transferencia", "tarjeta"}
 # =========================
 
 def _month_key(date: str) -> str:
-    return date[:7]  # "2026-03"
+    return date[:7]
 
 def _caja_path(date: str) -> Path:
     return CAJA_DIR / f"{_month_key(date)}.json"
@@ -139,7 +139,7 @@ def get_caja_day(date: str, professional: str):
         result.append({
             "time":           time,
             "rut":            slot.get("rut", ""),
-            "arrival_status": cs.get("arrival_status", "pending"),
+            "arrival_status": cs.get("arrival_status"),
             "tipo_atencion":  tipo,
             "monto":          monto,
             "pagado":         cs.get("pagado", False),
