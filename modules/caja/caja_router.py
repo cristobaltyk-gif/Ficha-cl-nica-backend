@@ -69,6 +69,15 @@ def _save_caja_slot(date: str, professional: str, time: str, slot: dict) -> None
     store.setdefault(date, {}).setdefault(professional, {})[time] = slot
     _save_json(path, store)
 
+def _delete_caja_slot(date: str, professional: str, time: str) -> None:
+    path  = _caja_path(date)
+    store = _load_json(path)
+    day   = store.get(date, {}).get(professional, {})
+    if time in day:
+        del day[time]
+        store.setdefault(date, {})[professional] = day
+        _save_json(path, store)
+
 def _load_pagos_day(date: str, professional: str) -> dict:
     store = _load_json(_pagos_path(date))
     return store.get(date, {}).get(professional, {})
@@ -90,6 +99,11 @@ class CajaUpdate(BaseModel):
     arrival_status: Optional[str] = None
     tipo_atencion:  Optional[str] = None
     pagado:         Optional[bool] = None
+
+class CajaSlotDelete(BaseModel):
+    date:         str
+    professional: str
+    time:         str
 
 class PagoCreate(BaseModel):
     date:             str
@@ -176,6 +190,15 @@ def update_caja_slot(data: CajaUpdate):
     return {"ok": True, "time": data.time}
 
 # =========================
+# DELETE — limpiar slot caja
+# =========================
+
+@router.delete("/slot")
+def delete_caja_slot(data: CajaSlotDelete):
+    _delete_caja_slot(data.date, data.professional, data.time)
+    return {"ok": True, "time": data.time}
+
+# =========================
 # POST — registrar pago
 # =========================
 
@@ -243,10 +266,7 @@ def anular_pago(data: AnulacionCreate):
     store.setdefault(data.date, {}).setdefault(data.professional, {})[data.time] = pagos[data.time]
     _save_json(path, store)
 
-    cs = _load_caja_slot(data.date, data.professional, data.time)
-    cs["arrival_status"] = None
-    cs["pagado"]         = False
-    _save_caja_slot(data.date, data.professional, data.time, cs)
+    _delete_caja_slot(data.date, data.professional, data.time)
 
     return {"ok": True}
 
@@ -285,4 +305,3 @@ def get_caja_summary(date: str, professional: str):
         "por_tipo":        por_tipo,
         "por_metodo":      por_metodo,
     }
-    
