@@ -1,6 +1,6 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 import json
 import os
 from pathlib import Path
@@ -20,6 +20,15 @@ TIPOS_VALIDOS = {
 TIPOS_GRATUITOS = {"control_gratuito", "cortesia"}
 ESTADOS_VALIDOS = {"waiting", "paid"}
 METODOS_VALIDOS = {"efectivo", "transferencia", "tarjeta"}
+
+TIPOS_LABELS = {
+    "particular":       "Particular",
+    "control_costo":    "Control con costo",
+    "control_gratuito": "Control gratuito",
+    "sobrecupo":        "Sobrecupo",
+    "cortesia":         "Cortesía",
+    "kinesiologia":     "Kinesiología",
+}
 
 # =========================
 # HELPERS
@@ -54,6 +63,10 @@ def _load_config() -> dict:
 def _load_agenda_day(date: str, professional: str) -> dict:
     store = _load_json(AGENDA_PATH)
     return store.get("calendar", {}).get(date, {}).get(professional, {}).get("slots", {})
+
+def _load_agenda_professionals(date: str) -> List[str]:
+    store = _load_json(AGENDA_PATH)
+    return list(store.get("calendar", {}).get(date, {}).keys())
 
 def _load_caja_slot(date: str, professional: str, time: str) -> dict:
     store = _load_json(_caja_path(date))
@@ -132,7 +145,7 @@ def get_config():
     return _load_config()
 
 # =========================
-# GET — panel del día
+# GET — panel del día (un profesional)
 # =========================
 
 @router.get("/day")
@@ -271,7 +284,7 @@ def anular_pago(data: AnulacionCreate):
     return {"ok": True}
 
 # =========================
-# GET — resumen del día
+# GET — resumen un profesional
 # =========================
 
 @router.get("/summary")
@@ -286,14 +299,27 @@ def get_caja_summary(date: str, professional: str):
     monto_total     = sum(p["monto"] for p in pagos.values() if not p.get("anulado", False))
     por_tipo        = {}
     por_metodo      = {}
+    pacientes       = []
 
-    for p in pagos.values():
+    for time, p in pagos.items():
         if p.get("anulado"):
             continue
         t = p["tipo_atencion"]
         m = p.get("metodo_pago") or "gratuito"
         por_tipo[t]   = por_tipo.get(t, 0) + 1
         por_metodo[m] = por_metodo.get(m, 0) + 1
+        pacientes.append({
+            "time":           time,
+            "rut":            p.get("rut", ""),
+            "tipo_atencion":  t,
+            "tipo_label":     TIPOS_LABELS.get(t, t),
+            "monto":          p.get("monto", 0),
+            "metodo_pago":    m,
+            "es_gratuito":    p.get("es_gratuito", False),
+            "pagado_at":      p.get("pagado_at"),
+        })
+
+    pacientes.sort(key=lambda x: x["time"])
 
     return {
         "date":            date,
@@ -304,4 +330,53 @@ def get_caja_summary(date: str, professional: str):
         "monto_total":     monto_total,
         "por_tipo":        por_tipo,
         "por_metodo":      por_metodo,
+        "pacientes":       pacientes,
     }
+
+# =========================
+# GET — resumen todos los profesionales del día
+# =========================
+
+@router.get("/resumen-dia")
+def get_resumen_dia(date: str, professional: Optional[str] = Query(None)):
+    professionals = [professional] if professional else _load_agenda_professionals(date)
+    config        = _load_config()
+
+    resumen_por_prof = []
+    total_global     = 0
+    por_tipo_global  = {}
+    por_metodo_global = {}
+    pacientes_global  = []
+
+    for prof in professionals:
+        s = get_caja_summary(date, prof)
+        resumen_por_prof.append({
+            "professional": prof,
+            "total_pacientes": s["total_pacientes"],
+            "pagados":         s["pagados"],
+            "esperando":       s["esperando"],
+            "monto_total":     s["monto_total"],
+        })
+        total_global += s["monto_total"]
+        for t, v in s["por_tipo"].items():
+            por_tipo_global[t]   = por_tipo_global.get(t, 0) + v
+        for m, v in s["por_metodo"].items():
+            por_metodo_global[m] = por_metodo_global.get(m, 0) + v
+        for p in s["pacientes"]:
+            pacientes_global.append({**p, "professional": prof})
+
+    pacientes_global.sort(key=lambda x: x["time"])
+
+    por_tipo_labeled = {
+        TIPOS_LABELS.get(t, t): v for t, v in por_tipo_global.items()
+    }
+
+    return {
+        "date":             date,
+        "monto_total":      total_global,
+        "por_tipo":         por_tipo_labeled,
+        "por_metodo":       por_metodo_global,
+        "por_profesional":  resumen_por_prof,
+        "pacientes":        pacientes_global,
+    }
+    
