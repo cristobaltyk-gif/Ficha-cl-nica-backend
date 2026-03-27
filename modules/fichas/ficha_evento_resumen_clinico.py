@@ -116,7 +116,7 @@ Plan:
 
     async with httpx.AsyncClient() as client:
         response = await client.post(
-            "http://localhost:8000/api/gpt/clinical-summary",
+            "http://localhost:8000/api/claude/clinical-summary",
             json={"historial": historial_texto},
             headers={
                 "X-Internal-User": user["usuario"]
