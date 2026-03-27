@@ -5,7 +5,7 @@
     "professional": "system",
     "role": {
       "name": "admin",
-      "entry": "/administracion",
+      "entry": "/admin",
       "allow": [
         "agenda",
         "pacientes",
