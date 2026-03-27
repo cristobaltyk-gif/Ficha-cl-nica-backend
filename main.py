@@ -26,6 +26,7 @@ from modules.fichas.ficha_evento_resumen_clinico import router as ficha_evento_r
 from api.gpt_summary import router as gpt_summary_router
 from api.claude_router import router as claude_clinical_router
 from modules.caja.caja_router import router as caja_router
+from api.claude_summary import router as claude_summary_router
 
 # ==========================
 # APP CORE
@@ -90,6 +91,7 @@ app.include_router(gpt_summary_router)
 
 # 🤖 Claude clínico
 app.include_router(claude_clinical_router)
+app.include_router(claude_summary_router)
 
 # 💰 Caja
 app.include_router(caja_router)
