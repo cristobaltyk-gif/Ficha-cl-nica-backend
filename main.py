@@ -1,6 +1,7 @@
 import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from auth.change_password_router import router as change_password_router
 
 # ==========================
 # Routers
@@ -84,6 +85,7 @@ app.include_router(ficha_evento_read_router)
 app.include_router(ficha_evento_update_router)
 app.include_router(ficha_evento_list_router)
 app.include_router(ficha_evento_resumen_clinico_router)
+app.include_router(change_password_router)
 
 # 🤖 GPT clínico (legacy)
 app.include_router(gpt_clinical_router)
