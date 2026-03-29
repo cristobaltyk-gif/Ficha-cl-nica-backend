@@ -8,7 +8,6 @@ LOCK = Lock()
 
 
 def _load_all() -> Dict[str, Any]:
-    """Lee todos los profesionales sin filtrar."""
     if not DATA_PATH.exists():
         DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
         DATA_PATH.write_text("{}", encoding="utf-8")
@@ -35,10 +34,6 @@ def load_professionals() -> Dict[str, Any]:
         valid[pid] = p
     return valid
 
-
-# ======================================================
-# MODIFICACIONES
-# ======================================================
 
 def set_day_blocks(
     *,
@@ -101,3 +96,4 @@ def unblock_date(*, professional_id: str, date_iso: str) -> None:
             blocked.remove(date_iso)
 
         save_professionals(data)
+        
