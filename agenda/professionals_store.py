@@ -3,42 +3,37 @@ from pathlib import Path
 from threading import Lock
 from typing import Dict, Any, List
 
-DATA_PATH = Path("data/professionals.json")
+DATA_PATH = Path("/data/professionals.json")
 LOCK = Lock()
 
 
-def load_professionals() -> Dict[str, Any]:
+def _load_all() -> Dict[str, Any]:
+    """Lee todos los profesionales sin filtrar."""
     if not DATA_PATH.exists():
         DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
         DATA_PATH.write_text("{}", encoding="utf-8")
         return {}
-
     with open(DATA_PATH, "r", encoding="utf-8") as f:
-        professionals = json.load(f)
+        return json.load(f)
 
-    # 🔒 Regla clínica: sin horario → no hay agenda
+
+def save_professionals(data: Dict[str, Any]) -> None:
+    DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(DATA_PATH, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+def load_professionals() -> Dict[str, Any]:
+    """Devuelve solo profesionales activos con schedule."""
+    data = _load_all()
     valid = {}
-    for pid, p in professionals.items():
+    for pid, p in data.items():
         if not p.get("active"):
             continue
         if "schedule" not in p:
             continue
         valid[pid] = p
-
     return valid
-
-
-def save_professionals(data: Dict[str, Any]) -> None:
-    with open(DATA_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-
-
-def _load_all() -> Dict[str, Any]:
-    """Lee todos los profesionales sin filtrar activos/schedule."""
-    if not DATA_PATH.exists():
-        return {}
-    with open(DATA_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
 
 
 # ======================================================
@@ -52,10 +47,6 @@ def set_day_blocks(
     blocks: List[Dict[str, str]],
     slot_minutes: int = 15
 ) -> None:
-    """
-    Define bloques para un día — guarda como array directo [{start, end}]
-    para ser compatible con AgendaDayController.
-    """
     with LOCK:
         data = _load_all()
         prof = data.get(professional_id)
@@ -65,19 +56,12 @@ def set_day_blocks(
         schedule = prof.setdefault("schedule", {})
         schedule["slotMinutes"] = slot_minutes
         days = schedule.setdefault("days", {})
-
-        # ✅ Array directo — mismo formato que professionals.json
-        days[weekday] = blocks
+        days[weekday] = blocks  # array directo [{start, end}]
 
         save_professionals(data)
 
 
-def close_day(
-    *,
-    professional_id: str,
-    weekday: str
-) -> None:
-    """Cierra un día completo (no atiende)."""
+def close_day(*, professional_id: str, weekday: str) -> None:
     with LOCK:
         data = _load_all()
         prof = data.get(professional_id)
@@ -91,12 +75,7 @@ def close_day(
         save_professionals(data)
 
 
-def block_date(
-    *,
-    professional_id: str,
-    date_iso: str
-) -> None:
-    """Bloquea una fecha específica (ej: vacaciones)."""
+def block_date(*, professional_id: str, date_iso: str) -> None:
     with LOCK:
         data = _load_all()
         prof = data.get(professional_id)
@@ -110,11 +89,7 @@ def block_date(
         save_professionals(data)
 
 
-def unblock_date(
-    *,
-    professional_id: str,
-    date_iso: str
-) -> None:
+def unblock_date(*, professional_id: str, date_iso: str) -> None:
     with LOCK:
         data = _load_all()
         prof = data.get(professional_id)
