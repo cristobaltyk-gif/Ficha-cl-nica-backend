@@ -11,29 +11,20 @@ from agenda import store
 # CANÓNICO ICA — SUMMARY ENGINE (PRODUCCIÓN)
 # ======================================================
 
-PROFESSIONALS_PATH = Path("data/professionals.json")
+PROFESSIONALS_PATH = Path("/data/professionals.json")
 
 FREE_THRESHOLD = 10
-LOW_THRESHOLD = 1
+LOW_THRESHOLD  = 1
 FULL_THRESHOLD = 0
 
 
-# ======================================================
-# Cargar profesionales
-# ======================================================
-
 def _load_professionals() -> Dict[str, Any]:
+    """Siempre fresco desde disco — refleja cambios sin reiniciar."""
     if not PROFESSIONALS_PATH.exists():
         return {}
     with open(PROFESSIONALS_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
 
-PROFESSIONALS = _load_professionals()
-
-
-# ======================================================
-# Helpers
-# ======================================================
 
 def _weekday_name(d: date) -> str:
     return d.strftime("%A").lower()
@@ -49,29 +40,23 @@ def _day_status(free_slots: int) -> str:
     return "empty"
 
 
-def _count_slots_in_blocks(
-    blocks: List[Dict[str, str]],
-    slot_minutes: int
-) -> int:
+def _count_slots_in_blocks(blocks: List[Dict[str, str]], slot_minutes: int) -> int:
     total = 0
     for b in blocks:
-        start = datetime.strptime(b["start"], "%H:%M")
-        end = datetime.strptime(b["end"], "%H:%M")
+        start   = datetime.strptime(b["start"], "%H:%M")
+        end     = datetime.strptime(b["end"],   "%H:%M")
         minutes = int((end - start).total_seconds() / 60)
-        total += minutes // slot_minutes
+        total  += minutes // slot_minutes
     return total
 
-
-# ======================================================
-# Conteo REAL de slots libres
-# ======================================================
 
 def _count_free_slots(
     day_data: Dict[str, Any],
     professional: str,
-    current_date: date
+    current_date: date,
+    professionals: Dict[str, Any]
 ) -> int:
-    prof_cfg = PROFESSIONALS.get(professional)
+    prof_cfg = professionals.get(professional)
     if not prof_cfg or not prof_cfg.get("active"):
         return -1
 
@@ -79,76 +64,47 @@ def _count_free_slots(
     if not schedule:
         return -1
 
-    weekday = _weekday_name(current_date)
+    weekday    = _weekday_name(current_date)
     day_blocks = schedule.get("days", {}).get(weekday)
 
-    # No trabaja ese día
     if not day_blocks:
         return -1
 
     slot_minutes = schedule.get("slotMinutes", 15)
+    total_slots  = _count_slots_in_blocks(day_blocks, slot_minutes)
 
-    total_slots = _count_slots_in_blocks(day_blocks, slot_minutes)
-
-    # Slots ocupados reales
     prof_day = day_data.get(professional, {})
-    slots = prof_day.get("slots", {})
-    busy = len(slots)
+    busy     = len(prof_day.get("slots", {}))
 
-    free = total_slots - busy
-    return max(free, 0)
+    return max(total_slots - busy, 0)
 
 
-# ======================================================
-# SUMMARY POR RANGO (7 / 30 días)
-# ======================================================
-
-def range_summary(
-    *,
-    professional: str,
-    start_date: str,
-    days: int
-) -> Dict[str, Any]:
-    start = date.fromisoformat(start_date)
+def range_summary(*, professional: str, start_date: str, days: int) -> Dict[str, Any]:
+    professionals = _load_professionals()
+    start         = date.fromisoformat(start_date)
     result_days: Dict[str, str] = {}
 
     for i in range(days):
-        current = start + timedelta(days=i)
-        iso = current.isoformat()
+        current    = start + timedelta(days=i)
+        iso        = current.isoformat()
+        day_data   = store.read_day(iso)
+        free_slots = _count_free_slots(day_data, professional, current, professionals)
+        result_days[iso] = "empty" if free_slots == -1 else _day_status(free_slots)
 
-        day_data = store.read_day(iso)
-        free_slots = _count_free_slots(day_data, professional, current)
+    return {"start_date": start_date, "professional": professional, "days": result_days}
 
-        status = "empty" if free_slots == -1 else _day_status(free_slots)
-        result_days[iso] = status
-
-    return {
-        "start_date": start_date,
-        "professional": professional,
-        "days": result_days
-    }
-
-
-# ======================================================
-# LEGACY
-# ======================================================
 
 def month_summary(*, professional: str, month: str) -> Dict[str, Any]:
-    year, mm = map(int, month.split("-"))
-    start = date(year, mm, 1)
+    year, mm   = map(int, month.split("-"))
+    start      = date(year, mm, 1)
     next_month = date(year + (mm == 12), (mm % 12) + 1, 1)
-    days = (next_month - start).days
-
     return range_summary(
         professional=professional,
         start_date=start.isoformat(),
-        days=days
+        days=(next_month - start).days
     )
 
 
 def week_summary(*, professional: str, week_start: str) -> Dict[str, Any]:
-    return range_summary(
-        professional=professional,
-        start_date=week_start,
-        days=7
-    )
+    return range_summary(professional=professional, start_date=week_start, days=7)
+    
