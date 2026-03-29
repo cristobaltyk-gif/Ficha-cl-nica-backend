@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from models.schemas import LoginRequest, LoginResponse, RoleSchema
-from auth.users_store import USERS
+from auth.users_store import load_users
 
 login_router = APIRouter()
 
@@ -10,10 +10,10 @@ login_router = APIRouter()
 @login_router.post("/login", response_model=LoginResponse)
 def login(data: LoginRequest):
 
-    # -------------------------------
-    # Buscar usuario
-    # -------------------------------
-    user = USERS.get(data.usuario)
+    # Lee siempre fresco desde /data/users.json
+    users = load_users()
+
+    user = users.get(data.usuario)
 
     if not user:
         raise HTTPException(status_code=401, detail="Usuario no existe")
@@ -24,24 +24,15 @@ def login(data: LoginRequest):
     if user.get("password") != data.clave:
         raise HTTPException(status_code=401, detail="Clave incorrecta")
 
-    # -------------------------------
-    # Rol viene COMPLETO desde users.json
-    # -------------------------------
     role_data = user.get("role")
     if not role_data:
         raise HTTPException(status_code=500, detail="Usuario sin rol definido")
 
-    # -------------------------------
-    # Professional SOLO si existe
-    # (NO se inventa, NO se asume)
-    # -------------------------------
-    professional = user.get("professional")  # puede ser None
+    professional = user.get("professional")
 
-    # -------------------------------
-    # Respuesta FINAL
-    # -------------------------------
     return LoginResponse(
         usuario=data.usuario,
         role=RoleSchema(**role_data),
         professional=professional
     )
+    
