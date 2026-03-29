@@ -1,112 +1,100 @@
 import json
 from pathlib import Path
+from threading import Lock
 from typing import Dict, Any
 
-DATA_FILE = Path("data/professionals.json")
+DATA_FILE  = Path("/data/professionals.json")
+USERS_FILE = Path("/data/users.json")
+LOCK = Lock()
 
-
-# ======================================================
-# HELPERS
-# ======================================================
 
 def _read_json() -> Dict[str, Any]:
-    """
-    Lee el archivo JSON completo.
-    """
     if not DATA_FILE.exists():
+        DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
+        DATA_FILE.write_text("{}", encoding="utf-8")
         return {}
-
     with open(DATA_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
 def _write_json(data: Dict[str, Any]) -> None:
-    """
-    Guarda el JSON completo en disco.
-    """
     DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
-
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
-# ======================================================
-# LECTURA
-# ======================================================
+def _read_users() -> Dict[str, Any]:
+    if not USERS_FILE.exists():
+        return {}
+    with open(USERS_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _write_users(data: Dict[str, Any]) -> None:
+    USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(USERS_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
 
 def list_professionals():
-    """
-    Devuelve lista completa (activos e inactivos).
-    """
-    data = _read_json()
-    return list(data.values())
+    return list(_read_json().values())
 
 
 def get_professional(pid: str):
-    """
-    Devuelve un profesional por ID.
-    """
-    data = _read_json()
-    return data.get(pid)
+    return _read_json().get(pid)
 
-
-# ======================================================
-# CREAR
-# ======================================================
 
 def add_professional(professional: Dict[str, Any]):
-    """
-    Agrega un profesional nuevo.
-    ID obligatorio.
-    """
-    data = _read_json()
+    """Crea profesional y su usuario automáticamente."""
+    with LOCK:
+        data = _read_json()
 
-    pid = professional.get("id")
-    if not pid:
-        raise ValueError("Falta campo obligatorio: id")
+        pid = professional.get("id")
+        if not pid:
+            raise ValueError("Falta campo obligatorio: id")
+        if pid in data:
+            raise ValueError("Profesional ya existe")
 
-    if pid in data:
-        raise ValueError("Profesional ya existe")
+        data[pid] = professional
+        _write_json(data)
 
-    data[pid] = professional
-    _write_json(data)
+        # Crear usuario automáticamente
+        users    = _read_users()
+        username = professional.get("username") or pid
+
+        if username not in users:
+            role = professional.get("role", "medico")
+            users[username] = {
+                "password":     professional.get("password", "cambiar123"),
+                "role": {
+                    "name":  role,
+                    "entry": f"/{role}",
+                    "allow": ["agenda", "pacientes", "atencion", "documentos"]
+                },
+                "professional": pid,
+                "active":       True
+            }
+            _write_users(users)
 
     return professional
 
 
-# ======================================================
-# UPDATE
-# ======================================================
-
 def update_professional(pid: str, updates: Dict[str, Any]):
-    """
-    Actualiza campos de un profesional existente.
-    """
-    data = _read_json()
+    with LOCK:
+        data = _read_json()
+        if pid not in data:
+            raise ValueError("Profesional no existe")
+        data[pid].update(updates)
+        _write_json(data)
+        return data[pid]
 
-    if pid not in data:
-        raise ValueError("Profesional no existe")
-
-    data[pid].update(updates)
-
-    _write_json(data)
-    return data[pid]
-
-
-# ======================================================
-# DELETE
-# ======================================================
 
 def delete_professional(pid: str):
-    """
-    Elimina un profesional del JSON.
-    """
-    data = _read_json()
-
-    if pid not in data:
-        raise ValueError("Profesional no existe")
-
-    removed = data.pop(pid)
-
-    _write_json(data)
-    return removed
+    with LOCK:
+        data = _read_json()
+        if pid not in data:
+            raise ValueError("Profesional no existe")
+        removed = data.pop(pid)
+        _write_json(data)
+        return removed
+        
