@@ -35,4 +35,3 @@ def login(data: LoginRequest):
         role=RoleSchema(**role_data),
         professional=professional
     )
-    
