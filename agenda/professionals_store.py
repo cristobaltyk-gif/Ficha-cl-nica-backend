@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import json
 from pathlib import Path
 from threading import Lock
@@ -16,12 +14,31 @@ def load_professionals() -> Dict[str, Any]:
         return {}
 
     with open(DATA_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+        professionals = json.load(f)
+
+    # 🔒 Regla clínica: sin horario → no hay agenda
+    valid = {}
+    for pid, p in professionals.items():
+        if not p.get("active"):
+            continue
+        if "schedule" not in p:
+            continue
+        valid[pid] = p
+
+    return valid
 
 
 def save_professionals(data: Dict[str, Any]) -> None:
     with open(DATA_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+def _load_all() -> Dict[str, Any]:
+    """Lee todos los profesionales sin filtrar activos/schedule."""
+    if not DATA_PATH.exists():
+        return {}
+    with open(DATA_PATH, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
 # ======================================================
@@ -36,10 +53,11 @@ def set_day_blocks(
     slot_minutes: int = 15
 ) -> None:
     """
-    Define bloques para un día (reemplaza lo anterior)
+    Define bloques para un día — guarda como array directo [{start, end}]
+    para ser compatible con AgendaDayController.
     """
     with LOCK:
-        data = load_professionals()
+        data = _load_all()
         prof = data.get(professional_id)
         if not prof:
             raise ValueError("Profesional no existe")
@@ -48,9 +66,8 @@ def set_day_blocks(
         schedule["slotMinutes"] = slot_minutes
         days = schedule.setdefault("days", {})
 
-        days[weekday] = {
-            "blocks": blocks
-        }
+        # ✅ Array directo — mismo formato que professionals.json
+        days[weekday] = blocks
 
         save_professionals(data)
 
@@ -60,11 +77,9 @@ def close_day(
     professional_id: str,
     weekday: str
 ) -> None:
-    """
-    Cierra un día completo (no atiende)
-    """
+    """Cierra un día completo (no atiende)."""
     with LOCK:
-        data = load_professionals()
+        data = _load_all()
         prof = data.get(professional_id)
         if not prof:
             raise ValueError("Profesional no existe")
@@ -81,11 +96,9 @@ def block_date(
     professional_id: str,
     date_iso: str
 ) -> None:
-    """
-    Bloquea una FECHA específica (ej: vacaciones)
-    """
+    """Bloquea una fecha específica (ej: vacaciones)."""
     with LOCK:
-        data = load_professionals()
+        data = _load_all()
         prof = data.get(professional_id)
         if not prof:
             raise ValueError("Profesional no existe")
@@ -103,7 +116,7 @@ def unblock_date(
     date_iso: str
 ) -> None:
     with LOCK:
-        data = load_professionals()
+        data = _load_all()
         prof = data.get(professional_id)
         if not prof:
             raise ValueError("Profesional no existe")
