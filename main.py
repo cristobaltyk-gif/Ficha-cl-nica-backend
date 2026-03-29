@@ -17,6 +17,7 @@ from core.professionals_router                      import router as professiona
 from agenda.router                                  import router as agenda_router
 from agenda.summary_router                          import router as agenda_summary_router
 from agenda.professionals_router                    import router as professionals_admin_router
+from admin.users_router                             import router as users_admin_router
 from modules.fichas.ficha_create                    import router as ficha_create_router
 from modules.fichas.ficha_read                      import router as ficha_read_router
 from modules.fichas.ficha_update                    import router as ficha_update_router
@@ -63,6 +64,7 @@ app.include_router(professionals_router)
 app.include_router(agenda_router)
 app.include_router(agenda_summary_router)
 app.include_router(professionals_admin_router)
+app.include_router(users_admin_router)
 app.include_router(ficha_create_router)
 app.include_router(ficha_read_router)
 app.include_router(ficha_update_router)
