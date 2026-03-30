@@ -32,6 +32,7 @@ from api.gpt_summary                                import router as gpt_summary
 from api.claude_router                              import router as claude_clinical_router
 from modules.caja.caja_router                       import router as caja_router
 from api.claude_summary                             import router as claude_summary_router
+from modules.control.control_gratuito_router        import router as control_gratuito_router
 
 # ==========================
 # APP CORE
@@ -79,6 +80,7 @@ app.include_router(claude_clinical_router)
 app.include_router(claude_summary_router)
 app.include_router(caja_router)
 app.include_router(pdf_router)
+app.include_router(control_gratuito_router)
 
 # ==========================
 # HEALTHCHECK
