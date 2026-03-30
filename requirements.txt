@@ -50,3 +50,8 @@ anthropic>=0.25.0
 # PDF generation
 # =========================
 reportlab
+
+# =========================
+# Email (Resend)
+# =========================
+resend
