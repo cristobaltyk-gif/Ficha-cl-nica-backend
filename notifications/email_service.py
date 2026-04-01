@@ -3,7 +3,9 @@ notifications/email_service.py
 """
 
 import os
+import base64
 import resend
+from typing import List, Tuple
 
 RESEND_API_KEY = os.getenv("RESEND_API_KEY")
 FROM_EMAIL     = "Instituto de Cirugía Articular <contacto@icarticular.cl>"
@@ -37,16 +39,11 @@ def enviar_confirmacion_gratuito(
 
     html = f"""
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; background: #fff;">
-
         <img src="{LOGO_URL}" alt="Instituto de Cirugía Articular" style="height: 60px; margin-bottom: 24px;" />
-
         <h2 style="color: #0f172a;">Confirmación de atención sin costo</h2>
-
         <p>Estimado/a <strong>{nombre_paciente}</strong>,</p>
-
         <p>Su próxima atención ha sido marcada como <strong>control gratuito</strong>.
         Por favor confirme haciendo click en el botón:</p>
-
         <a href="{link}" style="
             display: inline-block;
             background: #0f172a;
@@ -58,14 +55,12 @@ def enviar_confirmacion_gratuito(
             font-size: 15px;
             margin: 20px 0;
         ">✓ Confirmar atención gratuita</a>
-
         <div style="background: #f0fdf4; border: 1px solid #86efac; border-radius: 8px; padding: 16px; margin: 20px 0;">
             <p style="margin: 4px 0;"><strong>Fecha:</strong> {fecha}</p>
             <p style="margin: 4px 0;"><strong>Hora:</strong> {hora}</p>
             <p style="margin: 4px 0;"><strong>Profesional:</strong> {profesional_nombre}</p>
             <p style="margin: 4px 0; color: #16a34a; font-weight: bold;">Esta atención no tiene costo para usted.</p>
         </div>
-
         <p style="color: #64748b; font-size: 12px; margin-top: 24px;">
             Si no solicitó esta atención, ignore este mensaje.<br/>
             Instituto de Cirugía Articular — Curicó, Chile
@@ -87,37 +82,33 @@ def enviar_confirmacion_gratuito(
 
 
 # ======================================================
-# 2. ENVÍO DE PDF
+# 2. DOCUMENTOS DE ATENCIÓN (receta, informe, órdenes)
 # ======================================================
 
-def enviar_pdf_paciente(
+def enviar_documentos_atencion(
     *,
     email_paciente: str,
     nombre_paciente: str,
-    tipo_documento: str,
-    pdf_bytes: bytes,
-    nombre_archivo: str,
     fecha: str,
-    profesional: str
+    profesional_nombre: str,
+    adjuntos: List[Tuple[str, bytes]]  # [(nombre_archivo, bytes)]
 ) -> bool:
     _init()
 
-    import base64
-    pdf_b64 = base64.b64encode(pdf_bytes).decode("utf-8")
+    nombres = [a[0].replace(".pdf", "").replace("_", " ").title() for a in adjuntos]
+    lista_docs = "".join(f"<li>{n}</li>" for n in nombres)
 
     html = f"""
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px;">
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; background: #fff;">
         <img src="{LOGO_URL}" alt="Instituto de Cirugía Articular" style="height: 60px; margin-bottom: 24px;" />
-
-        <h2 style="color: #0f172a;">Documento clínico — {tipo_documento}</h2>
-
+        <h2 style="color: #0f172a;">Documentos de su atención médica</h2>
         <p>Estimado/a <strong>{nombre_paciente}</strong>,</p>
-
-        <p>Adjunto encontrará su <strong>{tipo_documento}</strong> generado el {fecha}
-        en el Instituto de Cirugía Articular.</p>
-
-        <p>Guarde este documento como respaldo de su atención médica.</p>
-
+        <p>Adjunto encontrará los documentos generados en su atención del <strong>{fecha}</strong>
+        con <strong>{profesional_nombre}</strong>:</p>
+        <ul style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px 24px; margin: 16px 0; color: #0f172a;">
+            {lista_docs}
+        </ul>
+        <p>Guarde estos documentos como respaldo de su atención médica.</p>
         <p style="color: #64748b; font-size: 12px; margin-top: 24px;">
             Instituto de Cirugía Articular — Curicó, Chile<br/>
             contacto@icarticular.cl
@@ -125,19 +116,24 @@ def enviar_pdf_paciente(
     </div>
     """
 
+    attachments = [
+        {
+            "filename": nombre,
+            "content":  base64.b64encode(contenido).decode("utf-8")
+        }
+        for nombre, contenido in adjuntos
+    ]
+
     try:
         resend.Emails.send({
             "from":        FROM_EMAIL,
             "to":          [email_paciente],
-            "subject":     f"ICA — {tipo_documento} · {fecha}",
+            "subject":     f"ICA — Documentos de su atención · {fecha}",
             "html":        html,
-            "attachments": [{
-                "filename": nombre_archivo,
-                "content":  pdf_b64
-            }]
+            "attachments": attachments
         })
         return True
     except Exception as e:
-        print(f"❌ ERROR EMAIL PDF: {e}")
+        print(f"❌ ERROR EMAIL documentos: {e}")
         return False
     
