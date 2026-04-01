@@ -9,7 +9,7 @@ from Documentospdf.informeMedico import generar_informe_pdf
 from Documentospdf.ordenKinesiologia import generarOrdenKinesiologia
 from Documentospdf.ordenQuirurgica import generarOrdenQuirurgica
 from Documentospdf.Examenes import generarOrdenExamenes
-from notifications.email_service import enviar_pdf_paciente
+from notifications.email_service import enviar_documentos_atencion
 
 
 router = APIRouter(
