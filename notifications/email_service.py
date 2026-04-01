@@ -9,6 +9,8 @@ RESEND_API_KEY = os.getenv("RESEND_API_KEY")
 FROM_EMAIL     = "Instituto de Cirugía Articular <contacto@icarticular.cl>"
 BACKEND_URL    = os.getenv("BACKEND_URL", "https://services.icarticular.cl")
 
+LOGO_URL = "https://lh3.googleusercontent.com/sitesv/APaQ0SSMBWniO2NWVDwGoaCaQjiel3lBKrmNgpaZZY-ZsYzTawYaf-_7Ad-xfeKVyfCqxa7WgzhWPKHtdaCS0jGtFRrcseP-R8KG1LfY2iYuhZeClvWEBljPLh9KANIClyKSsiSJH8_of4LPUOJUl7cWNwB2HKR7RVH_xB_h9BG-8Nr9jnorb-q2gId2=w300"
+
 
 def _init():
     if not RESEND_API_KEY:
@@ -26,16 +28,18 @@ def enviar_confirmacion_gratuito(
     nombre_paciente: str,
     fecha: str,
     hora: str,
-    profesional: str,
+    profesional_nombre: str,
     token: str
 ) -> bool:
     _init()
 
-    # Link apunta directo al backend — confirma y muestra HTML al paciente
     link = f"{BACKEND_URL}/api/control/confirmar?token={token}"
 
     html = f"""
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px;">
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; background: #fff;">
+
+        <img src="{LOGO_URL}" alt="Instituto de Cirugía Articular" style="height: 60px; margin-bottom: 24px;" />
+
         <h2 style="color: #0f172a;">Confirmación de atención sin costo</h2>
 
         <p>Estimado/a <strong>{nombre_paciente}</strong>,</p>
@@ -46,6 +50,7 @@ def enviar_confirmacion_gratuito(
         <div style="background: #f0fdf4; border: 1px solid #86efac; border-radius: 8px; padding: 16px; margin: 20px 0;">
             <p style="margin: 4px 0;"><strong>Fecha:</strong> {fecha}</p>
             <p style="margin: 4px 0;"><strong>Hora:</strong> {hora}</p>
+            <p style="margin: 4px 0;"><strong>Profesional:</strong> {profesional_nombre}</p>
             <p style="margin: 4px 0; color: #16a34a; font-weight: bold;">Esta atención no tiene costo para usted.</p>
         </div>
 
@@ -103,6 +108,8 @@ def enviar_pdf_paciente(
 
     html = f"""
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px;">
+        <img src="{LOGO_URL}" alt="Instituto de Cirugía Articular" style="height: 60px; margin-bottom: 24px;" />
+
         <h2 style="color: #0f172a;">Documento clínico — {tipo_documento}</h2>
 
         <p>Estimado/a <strong>{nombre_paciente}</strong>,</p>
@@ -134,4 +141,3 @@ def enviar_pdf_paciente(
     except Exception as e:
         print(f"❌ ERROR EMAIL PDF: {e}")
         return False
-    
