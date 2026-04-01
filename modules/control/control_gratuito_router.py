@@ -1,208 +1,282 @@
-import { useEffect, useState, useCallback } from "react";
-import Agenda from "./Agenda";
-import { useAuth } from "../../auth/AuthContext";
+"""
+modules/control/control_gratuito_router.py
+"""
 
-const API_URL = import.meta.env.VITE_API_URL;
+from __future__ import annotations
 
-export default function AgendaDayController({
-  professional,
-  date,
-  role,
-  onAttend,
-  onNoShow,
-  onCancelFinal,
-  onVerPagos,
-}) {
-  const { session } = useAuth();
-  const internalUser = session?.usuario;
+import json
+import secrets
+from pathlib import Path
+from datetime import datetime, timezone
+from threading import Lock
 
-  const [loading, setLoading] = useState(false);
-  const [agendaData, setAgendaData] = useState(null);
-  const [professionalsMap, setProfessionalsMap] = useState({});
-  const [patientsCache, setPatientsCache] = useState({});
+from fastapi import APIRouter, HTTPException, Depends
+from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
 
-  useEffect(() => {
-    async function loadProfessionals() {
-      try {
-        const res = await fetch(`${API_URL}/professionals`);
-        if (!res.ok) return;
-        const data = await res.json();
-        const map = {};
-        data.forEach((p) => { map[p.id] = p; });
-        setProfessionalsMap(map);
-      } catch {}
-    }
-    loadProfessionals();
-  }, []);
+from auth.internal_auth import require_internal_auth
+from agenda.store import load_store, save_store
+from notifications.email_service import enviar_confirmacion_gratuito
 
-  function getWeekdayKey(dateStr) {
-    const [y, m, d] = dateStr.split("-").map(Number);
-    const dt = new Date(y, m - 1, d);
-    return dt.toLocaleDateString("en-US", { weekday: "long" }).toLowerCase();
-  }
+router = APIRouter(prefix="/api/control", tags=["Control Gratuito"])
 
-  function buildSlotsFromSchedule(schedule, weekdayKey) {
-    const slots = {};
-    if (!schedule?.days?.[weekdayKey]) return slots;
-    const interval = schedule.slotMinutes;
-    schedule.days[weekdayKey].forEach(({ start, end }) => {
-      let minutes =
-        Number(start.split(":")[0]) * 60 + Number(start.split(":")[1]);
-      const endMinutes =
-        Number(end.split(":")[0]) * 60 + Number(end.split(":")[1]);
-      while (minutes < endMinutes) {
-        const hh = String(Math.floor(minutes / 60)).padStart(2, "0");
-        const mm = String(minutes % 60).padStart(2, "0");
-        slots[`${hh}:${mm}`] = { status: "available" };
-        minutes += interval;
-      }
-    });
-    return slots;
-  }
+TOKENS_PATH       = Path("/data/control_tokens.json")
+PROFESSIONALS_PATH = Path("/data/professionals.json")
+LOCK              = Lock()
+BASE_PACIENTES    = Path("/data/pacientes")
 
-  async function resolvePatients(slots) {
-    if (!internalUser) return;
-    const ruts = Object.values(slots)
-      .filter(s => (s.status === "reserved" || s.status === "confirmed") && s.rut)
-      .map(s => s.rut);
-    const uniqueRuts = [...new Set(ruts)];
-    const missing = uniqueRuts.filter(rut => !patientsCache[rut]);
-    if (missing.length === 0) return;
-    try {
-      const results = await Promise.all(
-        missing.map(rut =>
-          fetch(`${API_URL}/api/fichas/admin/${rut}`, {
-            headers: { "X-Internal-User": internalUser }
-          })
-            .then(r => r.ok ? r.json() : null)
-            .catch(() => null)
-        )
-      );
-      setPatientsCache(prev => {
-        const copy = { ...prev };
-        results.forEach(p => { if (p?.rut) copy[p.rut] = p; });
-        return copy;
-      });
-    } catch {}
-  }
 
-  const loadAgenda = useCallback(async () => {
-    if (!professional || !date) return;
-    const prof = professionalsMap[professional];
-    if (!prof) return;
+def _load_tokens() -> dict:
+    if not TOKENS_PATH.exists():
+        return {}
+    with open(TOKENS_PATH, "r", encoding="utf-8") as f:
+        return json.load(f)
 
-    setLoading(true);
 
-    try {
-      const [agendaRes, cajaRes] = await Promise.all([
-        fetch(`${API_URL}/agenda?date=${encodeURIComponent(date)}`),
-        fetch(`${API_URL}/api/caja/day?date=${encodeURIComponent(date)}&professional=${encodeURIComponent(professional)}`)
-          .catch(() => null)
-      ]);
+def _save_tokens(data: dict) -> None:
+    TOKENS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(TOKENS_PATH, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
 
-      if (!agendaRes.ok) throw new Error("agenda");
 
-      const agendaJson = await agendaRes.json();
+def _get_professional_name(professional_id: str) -> str:
+    if not PROFESSIONALS_PATH.exists():
+        return professional_id
+    with open(PROFESSIONALS_PATH, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return data.get(professional_id, {}).get("name", professional_id)
 
-      let cajaMap = {};
-      if (cajaRes?.ok) {
-        const cajaJson = await cajaRes.json();
-        (cajaJson.slots || []).forEach(s => {
-          cajaMap[s.time] = s;
-        });
-      }
 
-      const weekdayKey   = getWeekdayKey(date);
-      const baseSlots    = buildSlotsFromSchedule(prof.schedule, weekdayKey);
-      const backendSlots = agendaJson.calendar?.[professional]?.slots || {};
+def _get_slot(store: dict, date: str, professional: str, time: str) -> dict:
+    return (
+        store.get("calendar", {})
+             .get(date, {})
+             .get(professional, {})
+             .get("slots", {})
+             .get(time, {})
+    )
 
-      await resolvePatients(backendSlots);
 
-      Object.entries(backendSlots).forEach(([time, slot]) => {
-        if (role === "PUBLIC" && slot.status !== "available") {
-          delete baseSlots[time];
-          return;
+def _set_slot_field(store: dict, date: str, professional: str, time: str, updates: dict) -> None:
+    slot = (
+        store["calendar"]
+             .setdefault(date, {})
+             .setdefault(professional, {"schedule": {}, "slots": {}})
+             ["slots"]
+             .setdefault(time, {})
+    )
+    slot.update(updates)
+
+
+def _load_admin(rut: str) -> dict | None:
+    f = BASE_PACIENTES / rut / "admin.json"
+    if not f.exists():
+        return None
+    with open(f, "r", encoding="utf-8") as fp:
+        return json.load(fp)
+
+
+class MarcarGratuitoRequest(BaseModel):
+    date:         str
+    time:         str
+    professional: str
+
+
+class AceptarGratuitoRequest(BaseModel):
+    date:         str
+    time:         str
+    professional: str
+
+
+# ======================================================
+# 1. SECRETARIA — marca slot + envía email
+# ======================================================
+
+@router.post("/gratuito")
+def marcar_gratuito(
+    data: MarcarGratuitoRequest,
+    user=Depends(require_internal_auth)
+):
+    with LOCK:
+        store = load_store()
+        slot  = _get_slot(store, data.date, data.professional, data.time)
+
+        if not slot:
+            raise HTTPException(status_code=404, detail="Slot no encontrado")
+        if slot.get("status") not in ("reserved", "confirmed"):
+            raise HTTPException(status_code=400, detail="El slot no tiene reserva activa")
+
+        rut = slot.get("rut")
+        if not rut:
+            raise HTTPException(status_code=400, detail="Slot sin RUT de paciente")
+
+        admin = _load_admin(rut)
+        if not admin:
+            raise HTTPException(status_code=404, detail="Ficha del paciente no encontrada")
+
+        email = admin.get("email", "").strip()
+        if not email:
+            raise HTTPException(status_code=400, detail="El paciente no tiene email registrado")
+
+        token = secrets.token_urlsafe(32)
+
+        _set_slot_field(store, data.date, data.professional, data.time, {
+            "gratuito":             True,
+            "gratuito_token":       token,
+            "gratuito_confirmado":  False,
+            "gratuito_aceptado":    False,
+            "gratuito_marcado_por": user["usuario"],
+        })
+        save_store(store)
+
+        tokens = _load_tokens()
+        tokens[token] = {
+            "date":         data.date,
+            "time":         data.time,
+            "professional": data.professional,
+            "rut":          rut,
+            "created_at":   datetime.now(timezone.utc).isoformat()
         }
+        _save_tokens(tokens)
 
-        const cajaSlot = cajaMap[time] || null;
+    nombre_paciente    = f"{admin.get('nombre', '')} {admin.get('apellido_paterno', '')}".strip()
+    nombre_profesional = _get_professional_name(data.professional)
 
-        baseSlots[time] = {
-          time,
-          status:              slot.status,
-          rut:                 slot.rut || null,
-          patient:             slot.rut ? patientsCache[slot.rut] || null : null,
-          professional,
-          professionalName:    professionalsMap[professional]?.name || professional,
-          cajaStatus:          cajaSlot?.arrival_status    ?? null,
-          tipoCaja:            cajaSlot?.tipo_atencion     ?? null,
-          pagado:              cajaSlot?.pagado            ?? false,
-          monto:               cajaSlot?.monto             ?? null,
-          // 🔥 campos gratuito desde agenda
-          gratuito:            slot.gratuito              ?? false,
-          gratuito_confirmado: slot.gratuito_confirmado   ?? false,
-          gratuito_aceptado:   slot.gratuito_aceptado     ?? false,
-          date,
-        };
-      });
+    ok = enviar_confirmacion_gratuito(
+        email_paciente=email,
+        nombre_paciente=nombre_paciente,
+        fecha=data.date,
+        hora=data.time,
+        profesional_nombre=nombre_profesional,
+        token=token
+    )
 
-      setAgendaData({
-        calendar: {
-          [professional]: { slots: baseSlots }
-        }
-      });
-    } catch {
-      setAgendaData(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [professional, date, professionalsMap, patientsCache, internalUser]);
+    return {"ok": True, "email_enviado": ok, "email": email}
 
-  useEffect(() => { loadAgenda(); }, [loadAgenda]);
 
-  useEffect(() => {
-    if (!agendaData) return;
-    setAgendaData(prev => {
-      if (!prev) return prev;
-      const calendar = { ...prev.calendar };
-      const day = calendar[professional];
-      if (!day) return prev;
-      const slots = { ...day.slots };
-      Object.entries(slots).forEach(([time, slot]) => {
-        if (
-          (slot.status === "reserved" || slot.status === "confirmed") &&
-          slot.rut &&
-          patientsCache[slot.rut]
-        ) {
-          slots[time] = { ...slot, patient: patientsCache[slot.rut] };
-        }
-      });
-      return {
-        ...prev,
-        calendar: { ...calendar, [professional]: { ...day, slots } }
-      };
-    });
-  }, [patientsCache, professional]);
+# ======================================================
+# 2. PACIENTE — confirma via link → responde HTML
+# ======================================================
 
-  function handleSelectSlot(slot) {
-    if (role === "MEDICO" && slot.status === "available") return;
-    onAttend?.({ ...slot, professional, date });
-  }
+@router.get("/confirmar", response_class=HTMLResponse)
+def confirmar_gratuito(token: str):
+    with LOCK:
+        tokens = _load_tokens()
+        ref    = tokens.get(token)
 
-  if (!professional || !date) {
-    return <div className="agenda-placeholder">Selecciona un profesional y un día</div>;
-  }
+        if not ref:
+            return HTMLResponse(content=_html_page(
+                titulo="Enlace inválido",
+                mensaje="Este enlace ya fue usado o ha expirado.",
+                color="#ef4444", icono="❌"
+            ), status_code=404)
 
-  return (
-    <Agenda
-      loading={loading}
-      date={date}
-      professionals={[{
-        id:   professional,
-        name: professionalsMap[professional]?.name || professional
-      }]}
-      agendaData={agendaData}
-      onSelectSlot={handleSelectSlot}
-      onVerPagos={onVerPagos}
-    />
-  );
-}
+        store = load_store()
+        slot  = _get_slot(store, ref["date"], ref["professional"], ref["time"])
+
+        if not slot:
+            return HTMLResponse(content=_html_page(
+                titulo="Cita no encontrada",
+                mensaje="No se encontró la cita asociada a este enlace.",
+                color="#ef4444", icono="❌"
+            ), status_code=404)
+
+        if slot.get("gratuito_confirmado"):
+            return HTMLResponse(content=_html_page(
+                titulo="Ya confirmado",
+                mensaje="Su atención gratuita ya fue confirmada anteriormente. ¡Gracias!",
+                color="#16a34a", icono="✅"
+            ))
+
+        _set_slot_field(store, ref["date"], ref["professional"], ref["time"], {
+            "gratuito_confirmado": True,
+        })
+        save_store(store)
+
+        del tokens[token]
+        _save_tokens(tokens)
+
+    return HTMLResponse(content=_html_page(
+        titulo="¡Confirmado!",
+        mensaje=f"Su atención del {ref['date']} a las {ref['time']} ha sido confirmada como gratuita. El médico ha sido notificado.",
+        color="#16a34a", icono="✅"
+    ))
+
+
+# ======================================================
+# 3. MÉDICO — acepta
+# ======================================================
+
+@router.post("/aceptar")
+def aceptar_gratuito(
+    data: AceptarGratuitoRequest,
+    user=Depends(require_internal_auth)
+):
+    with LOCK:
+        store = load_store()
+        slot  = _get_slot(store, data.date, data.professional, data.time)
+
+        if not slot:
+            raise HTTPException(status_code=404, detail="Slot no encontrado")
+        if not slot.get("gratuito"):
+            raise HTTPException(status_code=400, detail="Este slot no está marcado como gratuito")
+        if not slot.get("gratuito_confirmado"):
+            raise HTTPException(status_code=400, detail="El paciente aún no ha confirmado")
+
+        _set_slot_field(store, data.date, data.professional, data.time, {
+            "gratuito_aceptado":     True,
+            "gratuito_aceptado_por": user["usuario"],
+        })
+        save_store(store)
+
+    return {"ok": True}
+
+
+# ======================================================
+# HTML helper
+# ======================================================
+
+def _html_page(titulo: str, mensaje: str, color: str, icono: str) -> str:
+    return f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Instituto de Cirugía Articular</title>
+  <style>
+    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{
+      font-family: 'Helvetica Neue', Arial, sans-serif;
+      background: #f8fafc;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }}
+    .card {{
+      background: #fff;
+      border-radius: 16px;
+      padding: 40px 32px;
+      max-width: 420px;
+      width: 100%;
+      text-align: center;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+    }}
+    .logo {{ height: 50px; margin-bottom: 24px; }}
+    .icono {{ font-size: 52px; margin-bottom: 20px; }}
+    .titulo {{ font-size: 22px; font-weight: 700; color: {color}; margin-bottom: 12px; }}
+    .mensaje {{ font-size: 15px; color: #475569; line-height: 1.6; }}
+    .footer {{ margin-top: 32px; font-size: 12px; color: #94a3b8; }}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <img class="logo" src="https://lh3.googleusercontent.com/sitesv/APaQ0SSMBWniO2NWVDwGoaCaQjiel3lBKrmNgpaZZY-ZsYzTawYaf-_7Ad-xfeKVyfCqxa7WgzhWPKHtdaCS0jGtFRrcseP-R8KG1LfY2iYuhZeClvWEBljPLh9KANIClyKSsiSJH8_of4LPUOJUl7cWNwB2HKR7RVH_xB_h9BG-8Nr9jnorb-q2gId2=w300" alt="ICA"/>
+    <div class="icono">{icono}</div>
+    <h1 class="titulo">{titulo}</h1>
+    <p class="mensaje">{mensaje}</p>
+    <p class="footer">Instituto de Cirugía Articular · Curicó, Chile</p>
+  </div>
+</body>
+</html>"""
