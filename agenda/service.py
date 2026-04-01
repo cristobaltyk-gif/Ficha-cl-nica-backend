@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Dict, Any
 
 from agenda import store
@@ -22,6 +24,57 @@ from agenda.utils import (
 
 DEFAULT_INTERVAL_MIN    = 15
 AUTO_CLEANUP_DAYS_AHEAD = 0
+
+BASE_PACIENTES    = Path("/data/pacientes")
+PROFESSIONALS_PATH = Path("/data/professionals.json")
+
+
+# =============================
+# Helpers internos
+# =============================
+
+def _load_admin(rut: str) -> dict | None:
+    f = BASE_PACIENTES / rut / "admin.json"
+    if not f.exists():
+        return None
+    with open(f, "r", encoding="utf-8") as fp:
+        return json.load(fp)
+
+
+def _get_professional_name(professional_id: str) -> str:
+    if not PROFESSIONALS_PATH.exists():
+        return professional_id
+    with open(PROFESSIONALS_PATH, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return data.get(professional_id, {}).get("name", professional_id)
+
+
+def _enviar_confirmacion_reserva(
+    rut: str,
+    date: str,
+    time: str,
+    professional: str
+) -> None:
+    """Envía email de confirmación de reserva al paciente. No bloquea si falla."""
+    try:
+        from notifications.email_service import enviar_confirmacion_reserva
+        admin = _load_admin(rut)
+        if not admin:
+            return
+        email = admin.get("email", "").strip()
+        if not email:
+            return
+        nombre = f"{admin.get('nombre', '')} {admin.get('apellido_paterno', '')}".strip()
+        nombre_prof = _get_professional_name(professional)
+        enviar_confirmacion_reserva(
+            email_paciente=email,
+            nombre_paciente=nombre,
+            fecha=date,
+            hora=time,
+            profesional_nombre=nombre_prof
+        )
+    except Exception as e:
+        print(f"⚠️ No se pudo enviar email de confirmación: {e}")
 
 
 # =============================
@@ -76,6 +129,9 @@ def create_slot(req: CreateSlotRequest) -> MutationResult:
         status=req.status,
         rut=rut,
     )
+
+    # Enviar email de confirmación de reserva
+    _enviar_confirmacion_reserva(rut, req.date, req.time, professional)
 
     return MutationResult(
         ok=True,
