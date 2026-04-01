@@ -21,7 +21,54 @@ def _init():
 
 
 # ======================================================
-# 1. CONFIRMACIÓN DE CONTROL GRATUITO
+# 1. CONFIRMACIÓN DE RESERVA
+# ======================================================
+
+def enviar_confirmacion_reserva(
+    *,
+    email_paciente: str,
+    nombre_paciente: str,
+    fecha: str,
+    hora: str,
+    profesional_nombre: str
+) -> bool:
+    _init()
+
+    html = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; background: #fff;">
+        <img src="{LOGO_URL}" alt="Instituto de Cirugía Articular" style="height: 60px; margin-bottom: 24px;" />
+        <h2 style="color: #0f172a;">Reserva confirmada</h2>
+        <p>Estimado/a <strong>{nombre_paciente}</strong>,</p>
+        <p>Su hora ha sido reservada exitosamente en el Instituto de Cirugía Articular:</p>
+        <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 16px; margin: 20px 0;">
+            <p style="margin: 4px 0;"><strong>Fecha:</strong> {fecha}</p>
+            <p style="margin: 4px 0;"><strong>Hora:</strong> {hora}</p>
+            <p style="margin: 4px 0;"><strong>Profesional:</strong> {profesional_nombre}</p>
+        </div>
+        <p>Por favor llegue 10 minutos antes de su hora. Si necesita cancelar o reagendar,
+        contáctenos a <a href="mailto:contacto@icarticular.cl">contacto@icarticular.cl</a>.</p>
+        <p style="color: #64748b; font-size: 12px; margin-top: 24px;">
+            Instituto de Cirugía Articular — Curicó, Chile<br/>
+            contacto@icarticular.cl
+        </p>
+    </div>
+    """
+
+    try:
+        resend.Emails.send({
+            "from":    FROM_EMAIL,
+            "to":      [email_paciente],
+            "subject": f"ICA — Reserva confirmada · {fecha} {hora}",
+            "html":    html
+        })
+        return True
+    except Exception as e:
+        print(f"❌ ERROR EMAIL reserva: {e}")
+        return False
+
+
+# ======================================================
+# 2. CONFIRMACIÓN DE CONTROL GRATUITO
 # ======================================================
 
 def enviar_confirmacion_gratuito(
@@ -82,7 +129,7 @@ def enviar_confirmacion_gratuito(
 
 
 # ======================================================
-# 2. DOCUMENTOS DE ATENCIÓN (receta, informe, órdenes)
+# 3. DOCUMENTOS DE ATENCIÓN
 # ======================================================
 
 def enviar_documentos_atencion(
@@ -91,7 +138,7 @@ def enviar_documentos_atencion(
     nombre_paciente: str,
     fecha: str,
     profesional_nombre: str,
-    adjuntos: List[Tuple[str, bytes]]  # [(nombre_archivo, bytes)]
+    adjuntos: List[Tuple[str, bytes]]
 ) -> bool:
     _init()
 
@@ -136,4 +183,3 @@ def enviar_documentos_atencion(
     except Exception as e:
         print(f"❌ ERROR EMAIL documentos: {e}")
         return False
-    
