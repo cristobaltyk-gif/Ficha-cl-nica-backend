@@ -1,17 +1,13 @@
 """
 notifications/email_service.py
-
-Servicio de email con Resend.
-Centraliza todos los envíos del sistema ICA.
 """
 
 import os
 import resend
-from typing import Optional
 
-RESEND_API_KEY  = os.getenv("RESEND_API_KEY")
-FROM_EMAIL      = "Instituto de Cirugía Articular <contacto@icarticular.cl>"
-FRONTEND_URL    = os.getenv("FRONTEND_URLS", "https://clinica.icarticular.cl").split(",")[0].strip()
+RESEND_API_KEY = os.getenv("RESEND_API_KEY")
+FROM_EMAIL     = "Instituto de Cirugía Articular <contacto@icarticular.cl>"
+BACKEND_URL    = os.getenv("BACKEND_URL", "https://services.icarticular.cl")
 
 
 def _init():
@@ -33,18 +29,13 @@ def enviar_confirmacion_gratuito(
     profesional: str,
     token: str
 ) -> bool:
-    """
-    Envía email al paciente para confirmar que su atención es sin costo.
-    Incluye link con token para que el paciente confirme.
-    """
     _init()
 
-    link = f"{FRONTEND_URL}/confirmar-gratuito?token={token}"
+    # Link apunta directo al backend — confirma y muestra HTML al paciente
+    link = f"{BACKEND_URL}/api/control/confirmar?token={token}"
 
     html = f"""
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px;">
-        <img src="https://clinica.icarticular.cl/ica-logo.png" alt="ICA" style="height: 60px; margin-bottom: 24px;" />
-
         <h2 style="color: #0f172a;">Confirmación de atención sin costo</h2>
 
         <p>Estimado/a <strong>{nombre_paciente}</strong>,</p>
@@ -55,7 +46,6 @@ def enviar_confirmacion_gratuito(
         <div style="background: #f0fdf4; border: 1px solid #86efac; border-radius: 8px; padding: 16px; margin: 20px 0;">
             <p style="margin: 4px 0;"><strong>Fecha:</strong> {fecha}</p>
             <p style="margin: 4px 0;"><strong>Hora:</strong> {hora}</p>
-            <p style="margin: 4px 0;"><strong>Profesional:</strong> {profesional}</p>
             <p style="margin: 4px 0; color: #16a34a; font-weight: bold;">Esta atención no tiene costo para usted.</p>
         </div>
 
@@ -93,22 +83,19 @@ def enviar_confirmacion_gratuito(
 
 
 # ======================================================
-# 2. ENVÍO DE PDF (RECETA / INFORME / EXÁMENES)
+# 2. ENVÍO DE PDF
 # ======================================================
 
 def enviar_pdf_paciente(
     *,
     email_paciente: str,
     nombre_paciente: str,
-    tipo_documento: str,  # "Receta", "Informe médico", "Orden de exámenes", etc.
+    tipo_documento: str,
     pdf_bytes: bytes,
     nombre_archivo: str,
     fecha: str,
     profesional: str
 ) -> bool:
-    """
-    Envía un PDF clínico al email del paciente como respaldo.
-    """
     _init()
 
     import base64
@@ -116,14 +103,12 @@ def enviar_pdf_paciente(
 
     html = f"""
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px;">
-        <img src="https://clinica.icarticular.cl/ica-logo.png" alt="ICA" style="height: 60px; margin-bottom: 24px;" />
-
         <h2 style="color: #0f172a;">Documento clínico — {tipo_documento}</h2>
 
         <p>Estimado/a <strong>{nombre_paciente}</strong>,</p>
 
         <p>Adjunto encontrará su <strong>{tipo_documento}</strong> generado el {fecha}
-        por {profesional} en el Instituto de Cirugía Articular.</p>
+        en el Instituto de Cirugía Articular.</p>
 
         <p>Guarde este documento como respaldo de su atención médica.</p>
 
@@ -149,21 +134,4 @@ def enviar_pdf_paciente(
     except Exception as e:
         print(f"❌ ERROR EMAIL PDF: {e}")
         return False
-
-
-# ======================================================
-# 3. NOTIFICACIÓN INTERNA — PACIENTE CONFIRMÓ
-# ======================================================
-
-def notificar_confirmacion_interna(
-    *,
-    nombre_paciente: str,
-    fecha: str,
-    hora: str,
-    profesional_id: str
-) -> None:
-    """
-    Registro interno cuando el paciente confirma gratuidad.
-    Por ahora solo log — se puede extender a WebSocket en el futuro.
-    """
-    print(f"✅ CONFIRMACIÓN GRATUITO: {nombre_paciente} — {fecha} {hora} — {profesional_id}")
+    
