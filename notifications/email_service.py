@@ -44,8 +44,20 @@ def enviar_confirmacion_gratuito(
 
         <p>Estimado/a <strong>{nombre_paciente}</strong>,</p>
 
-        <p>Le informamos que su próxima atención en el Instituto de Cirugía Articular
-        ha sido marcada como <strong>control gratuito</strong>:</p>
+        <p>Su próxima atención ha sido marcada como <strong>control gratuito</strong>.
+        Por favor confirme haciendo click en el botón:</p>
+
+        <a href="{link}" style="
+            display: inline-block;
+            background: #0f172a;
+            color: white;
+            padding: 14px 28px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: bold;
+            font-size: 15px;
+            margin: 20px 0;
+        ">✓ Confirmar atención gratuita</a>
 
         <div style="background: #f0fdf4; border: 1px solid #86efac; border-radius: 8px; padding: 16px; margin: 20px 0;">
             <p style="margin: 4px 0;"><strong>Fecha:</strong> {fecha}</p>
@@ -53,19 +65,6 @@ def enviar_confirmacion_gratuito(
             <p style="margin: 4px 0;"><strong>Profesional:</strong> {profesional_nombre}</p>
             <p style="margin: 4px 0; color: #16a34a; font-weight: bold;">Esta atención no tiene costo para usted.</p>
         </div>
-
-        <p>Por favor confirme que ha recibido esta información haciendo click en el botón:</p>
-
-        <a href="{link}" style="
-            display: inline-block;
-            background: #0f172a;
-            color: white;
-            padding: 12px 24px;
-            border-radius: 8px;
-            text-decoration: none;
-            font-weight: bold;
-            margin: 16px 0;
-        ">Confirmar atención gratuita</a>
 
         <p style="color: #64748b; font-size: 12px; margin-top: 24px;">
             Si no solicitó esta atención, ignore este mensaje.<br/>
@@ -141,3 +140,4 @@ def enviar_pdf_paciente(
     except Exception as e:
         print(f"❌ ERROR EMAIL PDF: {e}")
         return False
+    
