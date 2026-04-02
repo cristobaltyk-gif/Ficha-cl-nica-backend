@@ -20,31 +20,27 @@ GASTOS_PATH = Path("/data/gastos.json")
 CONFIG_PATH = Path("/data/gastos_config.json")
 LOCK        = Lock()
 
-# ======================================================
-# CATEGORÍAS POR DEFECTO
-# ======================================================
-
 DEFAULT_CONFIG = {
     "grupos": {
         "fijos": {
-            "label":       "Gastos Fijos",
-            "categorias":  ["Arriendo", "Sueldos"]
+            "label":      "Gastos Fijos",
+            "categorias": ["Arriendo", "Sueldos"]
         },
         "variables": {
-            "label":       "Gastos Variables",
-            "categorias":  ["Insumos médicos", "Equipamiento", "Marketing", "Otros"]
+            "label":      "Gastos Variables",
+            "categorias": ["Insumos médicos", "Equipamiento", "Marketing", "Otros"]
         },
         "cuentas": {
-            "label":       "Cuentas",
-            "categorias":  ["Servicios básicos", "Contabilidad", "Seguros"]
+            "label":      "Cuentas",
+            "categorias": ["Servicios básicos", "Contabilidad", "Seguros"]
+        },
+        "devoluciones": {
+            "label":      "Devoluciones",
+            "categorias": ["Devolución a paciente"]
         }
     }
 }
 
-
-# ======================================================
-# HELPERS
-# ======================================================
 
 def _load_gastos() -> dict:
     if not GASTOS_PATH.exists():
@@ -65,8 +61,15 @@ def _load_config() -> dict:
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump(DEFAULT_CONFIG, f, indent=2, ensure_ascii=False)
         return DEFAULT_CONFIG
+    config = {}
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+        config = json.load(f)
+    # Migrar: agregar devoluciones si no existe
+    if "devoluciones" not in config.get("grupos", {}):
+        config["grupos"]["devoluciones"] = DEFAULT_CONFIG["grupos"]["devoluciones"]
+        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+    return config
 
 
 def _save_config(data: dict) -> None:
@@ -75,29 +78,21 @@ def _save_config(data: dict) -> None:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
-# ======================================================
-# SCHEMAS
-# ======================================================
-
 class GastoCreate(BaseModel):
-    mes:        str        # YYYY-MM
-    grupo:      str        # fijos | variables | cuentas
-    categoria:  str
+    mes:         str
+    grupo:       str
+    categoria:   str
     descripcion: Optional[str] = ""
-    monto:      int
+    monto:       int
 
 class GastoUpdate(BaseModel):
     descripcion: Optional[str] = None
     monto:       Optional[int] = None
 
 class CategoriaCreate(BaseModel):
-    grupo:    str
+    grupo:     str
     categoria: str
 
-
-# ======================================================
-# CONFIG — categorías
-# ======================================================
 
 @router.get("/config")
 def get_config():
@@ -118,10 +113,6 @@ def add_categoria(data: CategoriaCreate):
     return {"ok": True}
 
 
-# ======================================================
-# GASTOS — CRUD
-# ======================================================
-
 @router.get("/{mes}")
 def get_gastos_mes(mes: str):
     gastos = _load_gastos()
@@ -135,7 +126,7 @@ def create_gasto(data: GastoCreate):
         mes    = gastos.setdefault(data.mes, {})
         grupo  = mes.setdefault(data.grupo, [])
 
-        gasto_id = f"{data.mes}_{data.grupo}_{data.categoria}_{datetime.now().strftime('%H%M%S%f')}"
+        gasto_id = f"{data.mes}_{data.grupo}_{datetime.now().strftime('%H%M%S%f')}"
 
         grupo.append({
             "id":          gasto_id,
@@ -178,4 +169,4 @@ def delete_gasto(gasto_id: str):
                         _save_gastos(gastos)
                         return {"ok": True}
     raise HTTPException(status_code=404, detail="Gasto no encontrado")
-  
+                  
