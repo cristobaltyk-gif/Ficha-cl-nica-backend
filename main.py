@@ -34,6 +34,8 @@ from modules.caja.caja_router                       import router as caja_router
 from api.claude_summary                             import router as claude_summary_router
 from modules.control.control_gratuito_router        import router as control_gratuito_router
 from api.claude_kine_router import router as claude_kine_router
+from modules.contable.gastos_router   import router as gastos_router
+from modules.contable.contable_router
 
 # ==========================
 # APP CORE
@@ -83,6 +85,8 @@ app.include_router(caja_router)
 app.include_router(pdf_router)
 app.include_router(control_gratuito_router)
 app.include_router(claude_kine_router)
+app.include_router(gastos_router)
+app.include_router(contable_router)
 
 # ==========================
 # HEALTHCHECK
