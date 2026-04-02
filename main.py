@@ -43,7 +43,7 @@ from modules.control.control_gratuito_router        import router as control_gra
 from modules.contable.gastos_router                 import router as gastos_router
 from modules.contable.contable_router               import router as contable_router
 from modules.pagos.confirmacion_router              import router as confirmacion_router
-from modules.rrhh.rrhh_router import router as rrhh_router
+from modules.rrhh.router import router as rrhh_router
 
 # ==========================
 # APP CORE
