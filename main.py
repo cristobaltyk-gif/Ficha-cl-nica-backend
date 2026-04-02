@@ -9,6 +9,12 @@ from init_data import init_disk_data
 init_disk_data()
 
 # ==========================
+# SCHEDULER
+# ==========================
+from modules.pagos.scheduler import start_scheduler
+start_scheduler()
+
+# ==========================
 # Routers
 # ==========================
 from auth.auth_service                              import login_router
@@ -30,12 +36,13 @@ from modules.fichas.ficha_evento_list               import router as ficha_event
 from modules.fichas.ficha_evento_resumen_clinico    import router as ficha_evento_resumen_clinico_router
 from api.gpt_summary                                import router as gpt_summary_router
 from api.claude_router                              import router as claude_clinical_router
+from api.claude_kine_router                         import router as claude_kine_router
 from modules.caja.caja_router                       import router as caja_router
 from api.claude_summary                             import router as claude_summary_router
 from modules.control.control_gratuito_router        import router as control_gratuito_router
-from api.claude_kine_router import router as claude_kine_router
-from modules.contable.gastos_router   import router as gastos_router
-from modules.contable.contable_router
+from modules.contable.gastos_router                 import router as gastos_router
+from modules.contable.contable_router               import router as contable_router
+from modules.pagos.confirmacion_router              import router as confirmacion_router
 
 # ==========================
 # APP CORE
@@ -80,13 +87,14 @@ app.include_router(ficha_evento_resumen_clinico_router)
 app.include_router(gpt_clinical_router)
 app.include_router(gpt_summary_router)
 app.include_router(claude_clinical_router)
+app.include_router(claude_kine_router)
 app.include_router(claude_summary_router)
 app.include_router(caja_router)
 app.include_router(pdf_router)
 app.include_router(control_gratuito_router)
-app.include_router(claude_kine_router)
 app.include_router(gastos_router)
 app.include_router(contable_router)
+app.include_router(confirmacion_router)
 
 # ==========================
 # HEALTHCHECK
@@ -96,6 +104,6 @@ def root():
     return {
         "status":  "ok",
         "service": "Ficha Clínica Backend",
-        "modules": ["auth", "professionals", "agenda", "agenda-summary", "caja"]
-    }
+        "modules": ["auth", "professionals", "agenda", "caja", "contable", "pagos"]
+                    }
     
