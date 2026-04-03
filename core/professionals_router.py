@@ -10,11 +10,11 @@ router = APIRouter(prefix="/professionals", tags=["professionals"])
 
 
 # ==========================
-# GET (ya lo tenías)
+# GET
 # ==========================
 @router.get("")
-def get_all():
-    return list_professionals()
+def get_all(public: bool = False):
+    return list_professionals(only_public=public)
 
 
 # ==========================
@@ -48,3 +48,4 @@ def remove(pid: str):
         return delete_professional(pid)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+        
