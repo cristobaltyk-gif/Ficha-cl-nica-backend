@@ -10,6 +10,7 @@ from typing import List, Tuple
 RESEND_API_KEY = os.getenv("RESEND_API_KEY")
 FROM_EMAIL     = "Instituto de Cirugía Articular <contacto@icarticular.cl>"
 BACKEND_URL    = os.getenv("BACKEND_URL", "https://services.icarticular.cl")
+PREDIAG_URL    = "https://app.icarticular.cl"
 
 LOGO_URL = "https://lh3.googleusercontent.com/sitesv/APaQ0SSMBWniO2NWVDwGoaCaQjiel3lBKrmNgpaZZY-ZsYzTawYaf-_7Ad-xfeKVyfCqxa7WgzhWPKHtdaCS0jGtFRrcseP-R8KG1LfY2iYuhZeClvWEBljPLh9KANIClyKSsiSJH8_of4LPUOJUl7cWNwB2HKR7RVH_xB_h9BG-8Nr9jnorb-q2gId2=w300"
 
@@ -20,6 +21,42 @@ def _init():
     resend.api_key = RESEND_API_KEY
 
 
+def _bloque_prediagnostico(nombre: str, rut: str = "") -> str:
+    from urllib.parse import urlencode
+    params = urlencode({
+        "nombre": nombre,
+        "rut":    rut,
+        "origen": "reserva",
+    })
+    link = f"{PREDIAG_URL}?{params}"
+    return f"""
+    <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px;
+                padding: 18px 20px; margin: 24px 0;">
+        <p style="margin: 0 0 8px 0; font-weight: bold; color: #1e3a5f; font-size: 15px;">
+            🩺 ¿Quiere llegar preparado a su consulta?
+        </p>
+        <p style="margin: 0 0 12px 0; color: #334155; font-size: 13px; line-height: 1.5;">
+            Nuestro asistente de <strong>prediagnóstico con IA</strong> puede sugerirle
+            los exámenes que necesitará antes de su cita, validados por su médico.
+            Ahorre tiempo y llegue listo.
+        </p>
+        <a href="{link}" style="
+            display: inline-block;
+            background: #1d4ed8;
+            color: white;
+            padding: 11px 22px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: bold;
+            font-size: 13px;
+        ">Iniciar prediagnóstico IA →</a>
+        <p style="margin: 10px 0 0 0; font-size: 11px; color: #94a3b8;">
+            Servicio opcional con valor. No reemplaza la consulta médica.
+        </p>
+    </div>
+    """
+
+
 # ======================================================
 # 1. CONFIRMACIÓN DE RESERVA
 # ======================================================
@@ -28,6 +65,7 @@ def enviar_confirmacion_reserva(
     *,
     email_paciente: str,
     nombre_paciente: str,
+    rut_paciente: str = "",
     fecha: str,
     hora: str,
     profesional_nombre: str
@@ -47,6 +85,9 @@ def enviar_confirmacion_reserva(
         </div>
         <p>Por favor llegue 10 minutos antes de su hora. Si necesita cancelar o reagendar,
         contáctenos a <a href="mailto:contacto@icarticular.cl">contacto@icarticular.cl</a>.</p>
+
+        {_bloque_prediagnostico(nombre_paciente, rut_paciente)}
+
         <p style="color: #64748b; font-size: 12px; margin-top: 24px;">
             Instituto de Cirugía Articular — Curicó, Chile<br/>
             contacto@icarticular.cl
@@ -183,3 +224,4 @@ def enviar_documentos_atencion(
     except Exception as e:
         print(f"❌ ERROR EMAIL documentos: {e}")
         return False
+    
