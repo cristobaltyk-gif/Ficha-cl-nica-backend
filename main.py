@@ -44,6 +44,8 @@ from modules.contable.gastos_router                 import router as gastos_rout
 from modules.contable.contable_router               import router as contable_router
 from modules.pagos.confirmacion_router              import router as confirmacion_router
 from modules.rrhh.router import router as rrhh_router
+from modules.fichas.prediagnostico_ia_router import router as prediag_ia_router
+
 
 # ==========================
 # APP CORE
@@ -97,6 +99,7 @@ app.include_router(gastos_router)
 app.include_router(contable_router)
 app.include_router(confirmacion_router)
 app.include_router(rrhh_router)
+app.include_router(prediag_ia_router)
 
 # ==========================
 # HEALTHCHECK
