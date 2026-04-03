@@ -36,8 +36,19 @@ def _write_users(data: Dict[str, Any]) -> None:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
-def list_professionals():
-    return list(_read_json().values())
+def _es_interno(p: Dict[str, Any]) -> bool:
+    """Profesionales con id o username que empieza con ia_ son internos (ocultos al público)."""
+    return (
+        str(p.get("id", "")).startswith("ia_") or
+        str(p.get("username", "")).startswith("ia_")
+    )
+
+
+def list_professionals(only_public: bool = False):
+    profs = list(_read_json().values())
+    if only_public:
+        return [p for p in profs if not _es_interno(p)]
+    return profs
 
 
 def get_professional(pid: str):
