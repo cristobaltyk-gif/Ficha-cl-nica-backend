@@ -21,14 +21,21 @@ def _init():
     resend.api_key = RESEND_API_KEY
 
 
-def _bloque_prediagnostico(nombre: str, rut: str = "") -> str:
+def _bloque_prediagnostico(
+    nombre: str,
+    rut: str = "",
+    edad: int | None = None,
+    sexo: str = "",
+) -> str:
     from urllib.parse import urlencode
-    params = urlencode({
+    params: dict = {
         "nombre": nombre,
         "rut":    rut,
         "origen": "reserva",
-    })
-    link = f"{PREDIAG_URL}?{params}"
+    }
+    if edad:   params["edad"]   = str(edad)
+    if sexo:   params["genero"] = sexo
+    link = f"{PREDIAG_URL}?{urlencode(params)}"
     return f"""
     <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px;
                 padding: 18px 20px; margin: 24px 0;">
@@ -68,7 +75,9 @@ def enviar_confirmacion_reserva(
     rut_paciente: str = "",
     fecha: str,
     hora: str,
-    profesional_nombre: str
+    profesional_nombre: str,
+    edad_paciente: int | None = None,   # ← NUEVO
+    sexo_paciente: str = "",            # ← NUEVO
 ) -> bool:
     _init()
 
@@ -86,7 +95,7 @@ def enviar_confirmacion_reserva(
         <p>Por favor llegue 10 minutos antes de su hora. Si necesita cancelar o reagendar,
         contáctenos a <a href="mailto:contacto@icarticular.cl">contacto@icarticular.cl</a>.</p>
 
-        {_bloque_prediagnostico(nombre_paciente, rut_paciente)}
+        {_bloque_prediagnostico(nombre_paciente, rut_paciente, edad_paciente, sexo_paciente)}
 
         <p style="color: #64748b; font-size: 12px; margin-top: 24px;">
             Instituto de Cirugía Articular — Curicó, Chile<br/>
@@ -224,4 +233,3 @@ def enviar_documentos_atencion(
     except Exception as e:
         print(f"❌ ERROR EMAIL documentos: {e}")
         return False
-    
