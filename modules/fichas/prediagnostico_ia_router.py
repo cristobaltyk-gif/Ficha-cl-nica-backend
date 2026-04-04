@@ -16,6 +16,7 @@ from typing import Optional
 
 from auth.users_store import load_users
 from modules.fichas.ficha_evento_create import patient_dir, LOCK, chile_now
+from modules.fichas.ficha_evento_schema import FichaEventoCreate
 
 # ============================================================
 # CONFIG
@@ -32,28 +33,22 @@ router = APIRouter(
 # SCHEMA
 # ============================================================
 class PrediagnosticoPayload(BaseModel):
-    # Datos paciente
-    rut:         str
-    nombre:      str
-    edad:        Optional[int]   = None
-    genero:      Optional[str]   = None
-
-    # Resultado IA
-    dolor:       Optional[str]   = ""
-    lado:        Optional[str]   = ""
-    diagnostico: Optional[str]   = ""
-    examenes:    Optional[list]  = []
+    rut:          str
+    nombre:       str
+    edad:         Optional[int]  = None
+    genero:       Optional[str]  = None
+    dolor:        Optional[str]  = ""
+    lado:         Optional[str]  = ""
+    diagnostico:  Optional[str]  = ""
+    examenes:     Optional[list] = []
     justificacion: Optional[str] = ""
-
-    # Metadata
-    idPago:      Optional[str]   = ""
-    modulo:      Optional[str]   = "trauma"
+    idPago:       Optional[str]  = ""
+    modulo:       Optional[str]  = "trauma"
 
 # ============================================================
-# AUTH — header x-internal-user: ia_prediagnostico
+# AUTH
 # ============================================================
 def _require_prediag_auth(x_internal_user: str = Header(None)):
-    """Valida que el llamado viene del backend de prediagnóstico."""
     if x_internal_user != IA_USER_KEY:
         raise HTTPException(status_code=401, detail="No autorizado")
 
@@ -65,11 +60,13 @@ def _get_ia_user():
             status_code=503,
             detail="Usuario IA no configurado. Crear 'ia_prediagnostico' en el sistema."
         )
+    # professional_name = apellido del usuario en users.json
+    professional_name = user.get("apellido") or user.get("apellido_paterno") or "Cristóbal Huerta"
     return {
         "usuario":            IA_USER_KEY,
         "role":               user.get("role"),
         "professional":       user.get("professional"),
-        "supervisor":         user.get("supervisor", ""),
+        "professional_name":  professional_name,
         "supervisor_display": user.get("supervisor_display", "Dr. Cristóbal Huerta Cortés"),
     }
 
@@ -93,7 +90,6 @@ def _ensure_ficha_admin(payload: PrediagnosticoPayload) -> bool:
     apellido_p   = nombre_parts[1] if len(nombre_parts) > 1 else ""
     apellido_m   = nombre_parts[2] if len(nombre_parts) > 2 else ""
 
-    # ← NUEVO: sexo desde genero del payload
     sexo = ""
     if payload.genero:
         g = payload.genero.upper()
@@ -108,7 +104,7 @@ def _ensure_ficha_admin(payload: PrediagnosticoPayload) -> bool:
         "apellido_paterno": apellido_p,
         "apellido_materno": apellido_m,
         "fecha_nacimiento": "",
-        "sexo":             sexo,        # ← NUEVO
+        "sexo":             sexo,
         "direccion":        "",
         "telefono":         "",
         "email":            "",
@@ -120,14 +116,18 @@ def _ensure_ficha_admin(payload: PrediagnosticoPayload) -> bool:
     afile.write_text(json.dumps(ficha, indent=2, ensure_ascii=False), encoding="utf-8")
     return True
 
-def _build_evento(payload: PrediagnosticoPayload, ia_user: dict) -> dict:
+def _normalizar_evento(payload: PrediagnosticoPayload, ia_user: dict) -> FichaEventoCreate:
+    """
+    Normaliza el payload del prediagnóstico al esquema FichaEventoCreate.
+    Así el evento queda idéntico a los creados por médicos.
+    """
     now   = datetime.now(ZoneInfo("America/Santiago"))
     fecha = now.strftime("%Y-%m-%d")
     hora  = now.strftime("%H:%M")
 
-    zona  = payload.dolor or ""
-    lado  = payload.lado  or ""
-    sint  = f"{zona} {lado}".strip()
+    zona = payload.dolor or ""
+    lado = payload.lado  or ""
+    sint = f"{zona} {lado}".strip()
 
     examenes_txt = "\n".join(f"• {e}" for e in (payload.examenes or []) if e)
 
@@ -153,26 +153,18 @@ def _build_evento(payload: PrediagnosticoPayload, ia_user: dict) -> dict:
         f"Justificación clínica IA:\n{payload.justificacion}"
     ) if payload.justificacion else ""
 
-    return {
-        "rut":                    payload.rut,
-        "fecha":                  fecha,
-        "hora":                   hora,
-        "atencion":               atencion,
-        "diagnostico":            diagnostico,
-        "examenes":               examenes_campo,
-        "indicaciones":           indicaciones,
-        "receta":                 "",
-        "orden_kinesiologia":     "",
-        "indicacion_quirurgica":  "",
-        "professional_id":        ia_user["professional"],
-        "professional_user":      ia_user["usuario"],
-        "professional_role":      ia_user["role"],
-        "supervisor":             ia_user["supervisor"],
-        "supervisor_display":     ia_user["supervisor_display"],
-        "origen":                 "prediagnostico_ia",
-        "estado_validacion":      "pendiente",
-        "created_at":             chile_now(),
-    }
+    return FichaEventoCreate(
+        rut=payload.rut,
+        fecha=fecha,
+        hora=hora,
+        atencion=atencion,
+        diagnostico=diagnostico,
+        examenes=examenes_campo,
+        indicaciones=indicaciones,
+        receta="",
+        orden_kinesiologia="",
+        indicacion_quirurgica="",
+    )
 
 # ============================================================
 # ENDPOINT
@@ -193,22 +185,30 @@ def registrar_prediagnostico(
         if not pdir.exists():
             raise HTTPException(status_code=500, detail="No se pudo crear directorio paciente")
 
-        # 2. Crear evento
-        evento     = _build_evento(payload, ia_user)
+        # 2. Normalizar al esquema FichaEventoCreate
+        evento_data = _normalizar_evento(payload, ia_user)
+
+        # 3. Grabar usando la misma lógica que ficha_evento_create
         events_dir = pdir / "eventos"
         events_dir.mkdir(exist_ok=True)
 
-        filename = f"{evento['fecha']}_{evento['hora'].replace(':','-')}_ia.json"
+        filename = f"{evento_data.fecha}_{evento_data.hora.replace(':','-')}.json"
         file     = events_dir / filename
 
-        # Si ya existe uno en el mismo minuto, agregar sufijo
         if file.exists():
             ts = datetime.now(ZoneInfo("America/Santiago")).strftime("%S")
-            filename = f"{evento['fecha']}_{evento['hora'].replace(':','-')}_{ts}_ia.json"
+            filename = f"{evento_data.fecha}_{evento_data.hora.replace(':','-')}_{ts}.json"
             file = events_dir / filename
 
+        evento_dict = evento_data.dict()
+        evento_dict["professional_id"]   = ia_user["professional"]
+        evento_dict["professional_user"] = ia_user["usuario"]
+        evento_dict["professional_role"] = ia_user["role"]
+        evento_dict["professional_name"] = ia_user["professional_name"]  # ← apellido del usuario
+        evento_dict["created_at"]        = chile_now()
+
         file.write_text(
-            json.dumps(evento, indent=2, ensure_ascii=False),
+            json.dumps(evento_dict, indent=2, ensure_ascii=False),
             encoding="utf-8"
         )
 
