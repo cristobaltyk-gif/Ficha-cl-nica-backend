@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Dict, Any
+from datetime import date as _date
 
 from agenda import store
 from agenda.models import (
@@ -25,7 +26,7 @@ from agenda.utils import (
 DEFAULT_INTERVAL_MIN    = 15
 AUTO_CLEANUP_DAYS_AHEAD = 0
 
-BASE_PACIENTES    = Path("/data/pacientes")
+BASE_PACIENTES     = Path("/data/pacientes")
 PROFESSIONALS_PATH = Path("/data/professionals.json")
 
 
@@ -49,6 +50,27 @@ def _get_professional_name(professional_id: str) -> str:
     return data.get(professional_id, {}).get("name", professional_id)
 
 
+def _calcular_edad(fecha_nacimiento: str) -> int | None:
+    """Calcula edad desde fecha_nacimiento (YYYY-MM-DD o DD MM YYYY)."""
+    if not fecha_nacimiento:
+        return None
+    try:
+        # Intentar formato YYYY-MM-DD
+        partes = str(fecha_nacimiento).strip().replace("/", "-").split("-")
+        if len(partes) == 3:
+            if len(partes[0]) == 4:
+                anio, mes, dia = int(partes[0]), int(partes[1]), int(partes[2])
+            else:
+                dia, mes, anio = int(partes[0]), int(partes[1]), int(partes[2])
+            hoy = _date.today()
+            edad = hoy.year - anio
+            if (hoy.month, hoy.day) < (mes, dia):
+                edad -= 1
+            return edad if edad > 0 else None
+    except Exception:
+        return None
+
+
 def _enviar_confirmacion_reserva(
     rut: str,
     date: str,
@@ -66,12 +88,20 @@ def _enviar_confirmacion_reserva(
             return
         nombre = f"{admin.get('nombre', '')} {admin.get('apellido_paterno', '')}".strip()
         nombre_prof = _get_professional_name(professional)
+
+        # ← NUEVO: edad y sexo desde admin.json
+        edad  = _calcular_edad(admin.get("fecha_nacimiento", ""))
+        sexo  = admin.get("sexo", "")
+
         enviar_confirmacion_reserva(
             email_paciente=email,
             nombre_paciente=nombre,
+            rut_paciente=rut,
             fecha=date,
             hora=time,
-            profesional_nombre=nombre_prof
+            profesional_nombre=nombre_prof,
+            edad_paciente=edad,       # ← NUEVO
+            sexo_paciente=sexo,       # ← NUEVO
         )
     except Exception as e:
         print(f"⚠️ No se pudo enviar email de confirmación: {e}")
@@ -258,4 +288,4 @@ def reschedule(req: RescheduleRequest) -> MutationResult:
 def daily_cleanup() -> None:
     keep_from = today_utc().isoformat()
     store.cleanup_past(keep_from_date=keep_from)
-    
+            
