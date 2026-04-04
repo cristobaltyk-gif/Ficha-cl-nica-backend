@@ -68,6 +68,7 @@ def update_ficha_administrativa(
             "apellido_paterno",
             "apellido_materno",
             "fecha_nacimiento",
+            "sexo",          # ← NUEVO
             "direccion",
             "telefono",
             "email",
@@ -86,4 +87,5 @@ def update_ficha_administrativa(
     return {
         "status": "ok",
         "rut": rut
-    }
+        }
+    
