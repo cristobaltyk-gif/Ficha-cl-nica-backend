@@ -22,7 +22,6 @@ from modules.fichas.ficha_evento_create import patient_dir, LOCK, chile_now
 # ============================================================
 BASE_DATA_PATH = Path("/data/pacientes")
 IA_USER_KEY    = "ia_prediagnostico"
-PREDIAG_SECRET = "ica_prediag_2024"   # ← mismo valor en env del backend prediagnóstico
 
 router = APIRouter(
     prefix="/api/prediagnostico",
@@ -51,10 +50,11 @@ class PrediagnosticoPayload(BaseModel):
     modulo:      Optional[str]   = "trauma"
 
 # ============================================================
-# AUTH SIMPLE — header secreto compartido
+# AUTH — header x-internal-user: ia_prediagnostico
 # ============================================================
-def _require_prediag_auth(x_prediag_secret: str = Header(None)):
-    if x_prediag_secret != PREDIAG_SECRET:
+def _require_prediag_auth(x_internal_user: str = Header(None)):
+    """Valida que el llamado viene del backend de prediagnóstico."""
+    if x_internal_user != IA_USER_KEY:
         raise HTTPException(status_code=401, detail="No autorizado")
 
 def _get_ia_user():
@@ -66,10 +66,10 @@ def _get_ia_user():
             detail="Usuario IA no configurado. Crear 'ia_prediagnostico' en el sistema."
         )
     return {
-        "usuario":      IA_USER_KEY,
-        "role":         user.get("role"),
-        "professional": user.get("professional"),
-        "supervisor":   user.get("supervisor", ""),
+        "usuario":            IA_USER_KEY,
+        "role":               user.get("role"),
+        "professional":       user.get("professional"),
+        "supervisor":         user.get("supervisor", ""),
         "supervisor_display": user.get("supervisor_display", "Dr. Cristóbal Huerta Cortés"),
     }
 
@@ -93,12 +93,22 @@ def _ensure_ficha_admin(payload: PrediagnosticoPayload) -> bool:
     apellido_p   = nombre_parts[1] if len(nombre_parts) > 1 else ""
     apellido_m   = nombre_parts[2] if len(nombre_parts) > 2 else ""
 
+    # ← NUEVO: sexo desde genero del payload
+    sexo = ""
+    if payload.genero:
+        g = payload.genero.upper()
+        if g in ("MASCULINO", "M", "MALE", "HOMBRE"):
+            sexo = "MASCULINO"
+        elif g in ("FEMENINO", "F", "FEMALE", "MUJER"):
+            sexo = "FEMENINO"
+
     ficha = {
         "rut":              payload.rut,
         "nombre":           nombre,
         "apellido_paterno": apellido_p,
         "apellido_materno": apellido_m,
         "fecha_nacimiento": "",
+        "sexo":             sexo,        # ← NUEVO
         "direccion":        "",
         "telefono":         "",
         "email":            "",
@@ -170,9 +180,9 @@ def _build_evento(payload: PrediagnosticoPayload, ia_user: dict) -> dict:
 @router.post("/registrar")
 def registrar_prediagnostico(
     payload: PrediagnosticoPayload,
-    x_prediag_secret: str = Header(None),
+    x_internal_user: str = Header(None),
 ):
-    _require_prediag_auth(x_prediag_secret)
+    _require_prediag_auth(x_internal_user)
     ia_user = _get_ia_user()
 
     with LOCK:
@@ -184,7 +194,7 @@ def registrar_prediagnostico(
             raise HTTPException(status_code=500, detail="No se pudo crear directorio paciente")
 
         # 2. Crear evento
-        evento    = _build_evento(payload, ia_user)
+        evento     = _build_evento(payload, ia_user)
         events_dir = pdir / "eventos"
         events_dir.mkdir(exist_ok=True)
 
@@ -210,3 +220,4 @@ def registrar_prediagnostico(
         "supervisor":  ia_user["supervisor_display"],
         "estado":      "pendiente_validacion",
     }
+    
