@@ -86,17 +86,18 @@ def create_ficha_administrativa(data: Dict[str, Any]):
         # FICHA ADMINISTRATIVA (CONTRATO ÚNICO)
         # ---------------------------
         ficha = {
-            "rut": rut,
-            "nombre": data["nombre"],
-            "apellido_paterno": data["apellido_paterno"],
-            "apellido_materno": data.get("apellido_materno", ""),
-            "fecha_nacimiento": data["fecha_nacimiento"],
-            "direccion": data.get("direccion", ""),
-            "telefono": data.get("telefono", ""),
-            "email": data.get("email", ""),
-            "prevision": data.get("prevision", ""),
-            "created_at": utc_now(),
-            "updated_at": utc_now()
+            "rut":               rut,
+            "nombre":            data["nombre"],
+            "apellido_paterno":  data["apellido_paterno"],
+            "apellido_materno":  data.get("apellido_materno", ""),
+            "fecha_nacimiento":  data["fecha_nacimiento"],
+            "sexo":              data.get("sexo", ""),   # ← NUEVO
+            "direccion":         data.get("direccion", ""),
+            "telefono":          data.get("telefono", ""),
+            "email":             data.get("email", ""),
+            "prevision":         data.get("prevision", ""),
+            "created_at":        utc_now(),
+            "updated_at":        utc_now()
         }
 
         file.write_text(
@@ -108,3 +109,4 @@ def create_ficha_administrativa(data: Dict[str, Any]):
         "status": "ok",
         "rut": rut
     }
+    
