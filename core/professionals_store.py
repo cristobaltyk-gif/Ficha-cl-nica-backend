@@ -37,10 +37,21 @@ def _write_users(data: Dict[str, Any]) -> None:
 
 
 def _es_interno(p: Dict[str, Any]) -> bool:
-    """Profesionales con id o username que empieza con ia_ son internos (ocultos al público)."""
+    """
+    Detecta profesionales internos (ocultos al público).
+    Cubre todas las variantes de nombre del profesional IA.
+    """
+    id_str   = str(p.get("id", "")).lower().replace(" ", "_")
+    user_str = str(p.get("username", "")).lower().replace(" ", "_")
+    name_str = str(p.get("name", "")).lower()
+
     return (
-        str(p.get("id", "")).startswith("ia_") or
-        str(p.get("username", "")).startswith("ia_")
+        id_str.startswith("ia_") or
+        id_str.startswith("ia ") or
+        user_str.startswith("ia_") or
+        "prediagnóstico" in name_str or
+        "prediagnostico" in name_str or
+        "prediagn" in name_str
     )
 
 
