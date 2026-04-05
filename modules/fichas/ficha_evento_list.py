@@ -71,12 +71,20 @@ def list_clinical_events(
             try:
                 data = json.loads(file.read_text(encoding="utf-8"))
 
+                # ← fallback: professional_name > professional_user > professional_id
+                professional_name = (
+                    data.get("professional_name") or
+                    data.get("professional_user") or
+                    data.get("professional_id") or
+                    ""
+                )
+
                 eventos_resumen.append({
-                    "fecha": data.get("fecha"),
-                    "hora": data.get("hora"),
-                    "diagnostico": data.get("diagnostico"),
-                    "professional_name": data.get("professional_name"),
-                    "created_at": data.get("created_at")
+                    "fecha":             data.get("fecha"),
+                    "hora":              data.get("hora"),
+                    "diagnostico":       data.get("diagnostico"),
+                    "professional_name": professional_name,
+                    "created_at":        data.get("created_at")
                 })
 
             except Exception:
