@@ -80,26 +80,20 @@ def _build_evento(
     examenes_txt = "\n".join(f"• {e}" for e in (payload.examenes or []) if e)
 
     atencion = (
-        f"[PREDIAGNÓSTICO IA — pendiente validación médica]\n\n"
-        f"Consulta iniciada vía sistema de prediagnóstico en línea.\n"
+        f"Consulta de prediagnóstico en línea.\n"
         f"Motivo: {sint or 'No especificado'}\n"
         f"Módulo: {payload.modulo or 'trauma'}\n"
         f"ID Pago: {payload.idPago or '—'}"
     )
 
-    diagnostico = (
-        f"[IA] {payload.diagnostico}\n\n"
-        f"⚠️ Diagnóstico presuntivo generado por IA. "
-        f"Debe ser validado por {professional_name}."
-    ) if payload.diagnostico else "[IA] Sin diagnóstico presuntivo"
+    # ← Diagnóstico limpio sin prefijos ni avisos
+    diagnostico = payload.diagnostico or ""
 
     examenes_campo = (
-        f"Exámenes sugeridos por IA (pendiente validación médica):\n{examenes_txt}"
+        f"Exámenes sugeridos por IA:\n{examenes_txt}"
     ) if examenes_txt else ""
 
-    indicaciones = (
-        f"Justificación clínica IA:\n{payload.justificacion}"
-    ) if payload.justificacion else ""
+    indicaciones = payload.justificacion or ""
 
     return {
         "rut":                   payload.rut,
@@ -115,7 +109,8 @@ def _build_evento(
         "professional_id":       user["professional"],
         "professional_user":     user["usuario"],
         "professional_role":     user["role"],
-        "professional_name":     professional_name,
+        # ← IA que generó + médico que valida
+        "professional_name":     f"IA prediagnóstico · {professional_name}",
         "created_at":            _chile_now(),
     }
 
@@ -134,7 +129,7 @@ def registrar_prediagnostico(
     if user["usuario"] != IA_USER_KEY:
         raise HTTPException(status_code=403, detail="Sin atribuciones para este endpoint")
 
-    # 2. Nombre del profesional desde professionals.json
+    # 2. Nombre del profesional supervisor desde professionals.json
     professional_name = _get_professional_name(user["professional"])
 
     # 3. Verificar que la ficha del paciente existe
@@ -171,3 +166,4 @@ def registrar_prediagnostico(
         "evento": filename,
         "estado": "pendiente_validacion",
     }
+    
