@@ -1,12 +1,14 @@
 # modules/fichas/prediagnostico_ia_router.py
 # Recibe resultado del prediagnóstico y graba evento en ICA
 # Llamado desde el backend de prediagnóstico tras emitir PDF
-# Profesional grabador: ia_prediagnostico (supervisor: Dr. Cristóbal Huerta Cortés)
+# Profesional grabador: ia_prediagnostico
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from pathlib import Path
+from threading import Lock
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Header
@@ -14,15 +16,14 @@ from pydantic import BaseModel
 from typing import Optional
 
 from auth.internal_auth import require_internal_auth
-from auth.users_store import load_users
-from modules.fichas.ficha_evento_create import save_clinical_event
-from modules.fichas.ficha_evento_schema import FichaEventoCreate
 
 # ============================================================
 # CONFIG
 # ============================================================
-BASE_DATA_PATH = Path("/data/pacientes")
-IA_USER_KEY    = "ia_prediagnostico"
+BASE_DATA_PATH     = Path("/data/pacientes")
+PROFESSIONALS_PATH = Path("/data/professionals.json")
+IA_USER_KEY        = "ia_prediagnostico"
+_LOCK              = Lock()
 
 router = APIRouter(
     prefix="/api/prediagnostico",
@@ -46,17 +47,28 @@ class PrediagnosticoPayload(BaseModel):
     modulo:        Optional[str]  = "trauma"
 
 # ============================================================
-# AUTH
+# HELPERS
 # ============================================================
-def _require_prediag_auth(x_internal_user: str = Header(None)):
-    if not x_internal_user or x_internal_user != IA_USER_KEY:
-        raise HTTPException(status_code=401, detail="No autorizado")
-    return require_internal_auth(x_internal_user=x_internal_user)
+def _chile_now() -> str:
+    return datetime.now(ZoneInfo("America/Santiago")).isoformat()
+
+def _get_professional_name(professional_id: str) -> str:
+    try:
+        if not PROFESSIONALS_PATH.exists():
+            return professional_id
+        data = json.loads(PROFESSIONALS_PATH.read_text(encoding="utf-8"))
+        return data.get(professional_id, {}).get("name", professional_id)
+    except Exception:
+        return professional_id
 
 # ============================================================
 # NORMALIZAR EVENTO
 # ============================================================
-def _build_evento_create(payload: PrediagnosticoPayload, ia_user: dict) -> FichaEventoCreate:
+def _build_evento(
+    payload: PrediagnosticoPayload,
+    user: dict,
+    professional_name: str,
+) -> dict:
     now   = datetime.now(ZoneInfo("America/Santiago"))
     fecha = now.strftime("%Y-%m-%d")
     hora  = now.strftime("%H:%M")
@@ -66,7 +78,6 @@ def _build_evento_create(payload: PrediagnosticoPayload, ia_user: dict) -> Ficha
     sint = f"{zona} {lado}".strip()
 
     examenes_txt = "\n".join(f"• {e}" for e in (payload.examenes or []) if e)
-    supervisor   = ia_user.get("supervisor_display", "Dr. Cristóbal Huerta Cortés")
 
     atencion = (
         f"[PREDIAGNÓSTICO IA — pendiente validación médica]\n\n"
@@ -79,7 +90,7 @@ def _build_evento_create(payload: PrediagnosticoPayload, ia_user: dict) -> Ficha
     diagnostico = (
         f"[IA] {payload.diagnostico}\n\n"
         f"⚠️ Diagnóstico presuntivo generado por IA. "
-        f"Debe ser validado por {supervisor}."
+        f"Debe ser validado por {professional_name}."
     ) if payload.diagnostico else "[IA] Sin diagnóstico presuntivo"
 
     examenes_campo = (
@@ -90,18 +101,23 @@ def _build_evento_create(payload: PrediagnosticoPayload, ia_user: dict) -> Ficha
         f"Justificación clínica IA:\n{payload.justificacion}"
     ) if payload.justificacion else ""
 
-    return FichaEventoCreate(
-        rut=payload.rut,
-        fecha=fecha,
-        hora=hora,
-        atencion=atencion,
-        diagnostico=diagnostico,
-        examenes=examenes_campo,
-        indicaciones=indicaciones,
-        receta="",
-        orden_kinesiologia="",
-        indicacion_quirurgica="",
-    )
+    return {
+        "rut":                   payload.rut,
+        "fecha":                 fecha,
+        "hora":                  hora,
+        "atencion":              atencion,
+        "diagnostico":           diagnostico,
+        "examenes":              examenes_campo,
+        "indicaciones":          indicaciones,
+        "receta":                "",
+        "orden_kinesiologia":    "",
+        "indicacion_quirurgica": "",
+        "professional_id":       user["professional"],
+        "professional_user":     user["usuario"],
+        "professional_role":     user["role"],
+        "professional_name":     professional_name,
+        "created_at":            _chile_now(),
+    }
 
 # ============================================================
 # ENDPOINT
@@ -111,17 +127,17 @@ def registrar_prediagnostico(
     payload: PrediagnosticoPayload,
     x_internal_user: str = Header(None),
 ):
-    # 1. Auth — valida y obtiene user completo
-    ia_user = _require_prediag_auth(x_internal_user)
+    # 1. Auth — valida identidad y atribuciones
+    user = require_internal_auth(x_internal_user=x_internal_user)
 
-    # supervisor_display desde users.json
-    users     = load_users()
-    user_data = users.get(IA_USER_KEY, {})
-    ia_user["supervisor_display"] = user_data.get(
-        "supervisor_display", "Dr. Cristóbal Huerta Cortés"
-    )
+    # Solo ia_prediagnostico puede usar este endpoint
+    if user["usuario"] != IA_USER_KEY:
+        raise HTTPException(status_code=403, detail="Sin atribuciones para este endpoint")
 
-    # 2. Verificar que la ficha del paciente existe
+    # 2. Nombre del profesional desde professionals.json
+    professional_name = _get_professional_name(user["professional"])
+
+    # 3. Verificar que la ficha del paciente existe
     pdir = BASE_DATA_PATH / payload.rut
     if not pdir.exists():
         raise HTTPException(
@@ -129,17 +145,29 @@ def registrar_prediagnostico(
             detail=f"Ficha del paciente {payload.rut} no encontrada"
         )
 
-    # 3. Normalizar a FichaEventoCreate
-    evento_data = _build_evento_create(payload, ia_user)
+    # 4. Normalizar y grabar evento
+    evento = _build_evento(payload, user, professional_name)
 
-    # 4. Grabar usando save_clinical_event — mismo flujo que médicos
-    result = save_clinical_event(data=evento_data, user=ia_user)
+    with _LOCK:
+        events_dir = pdir / "eventos"
+        events_dir.mkdir(exist_ok=True)
+
+        filename = f"{evento['fecha']}_{evento['hora'].replace(':','-')}.json"
+        file     = events_dir / filename
+
+        if file.exists():
+            ts = datetime.now(ZoneInfo("America/Santiago")).strftime("%S")
+            filename = f"{evento['fecha']}_{evento['hora'].replace(':','-')}_{ts}.json"
+            file = events_dir / filename
+
+        file.write_text(
+            json.dumps(evento, indent=2, ensure_ascii=False),
+            encoding="utf-8"
+        )
 
     return {
-        "ok":        True,
-        "rut":       payload.rut,
-        "resultado": result,
-        "supervisor": ia_user["supervisor_display"],
-        "estado":    "pendiente_validacion",
+        "ok":     True,
+        "rut":    payload.rut,
+        "evento": filename,
+        "estado": "pendiente_validacion",
     }
-    
