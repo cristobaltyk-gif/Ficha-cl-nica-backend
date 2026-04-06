@@ -1,0 +1,164 @@
+{
+  "regiones": [
+    {
+      "id": "arica_parinacota",
+      "nombre": "Arica y Parinacota",
+      "bbox": {
+        "latMin": -19.50,
+        "latMax": -17.50,
+        "lonMin": -70.50,
+        "lonMax": -69.00
+      }
+    },
+    {
+      "id": "tarapaca",
+      "nombre": "Tarapacá",
+      "bbox": {
+        "latMin": -21.80,
+        "latMax": -19.50,
+        "lonMin": -70.20,
+        "lonMax": -68.50
+      }
+    },
+    {
+      "id": "antofagasta",
+      "nombre": "Antofagasta",
+      "bbox": {
+        "latMin": -26.50,
+        "latMax": -21.80,
+        "lonMin": -70.60,
+        "lonMax": -66.50
+      }
+    },
+    {
+      "id": "atacama",
+      "nombre": "Atacama",
+      "bbox": {
+        "latMin": -29.20,
+        "latMax": -26.50,
+        "lonMin": -71.60,
+        "lonMax": -68.00
+      }
+    },
+    {
+      "id": "coquimbo",
+      "nombre": "Coquimbo",
+      "bbox": {
+        "latMin": -32.30,
+        "latMax": -29.20,
+        "lonMin": -71.70,
+        "lonMax": -69.80
+      }
+    },
+    {
+      "id": "valparaiso",
+      "nombre": "Valparaíso",
+      "bbox": {
+        "latMin": -33.90,
+        "latMax": -32.30,
+        "lonMin": -71.80,
+        "lonMax": -70.00
+      }
+    },
+    {
+      "id": "metropolitana",
+      "nombre": "Región Metropolitana",
+      "bbox": {
+        "latMin": -34.30,
+        "latMax": -33.00,
+        "lonMin": -71.10,
+        "lonMax": -69.80
+      }
+    },
+    {
+      "id": "ohiggins",
+      "nombre": "O'Higgins",
+      "bbox": {
+        "latMin": -35.10,
+        "latMax": -34.30,
+        "lonMin": -71.80,
+        "lonMax": -70.00
+      }
+    },
+    {
+      "id": "maule",
+      "nombre": "Maule",
+      "bbox": {
+        "latMin": -36.60,
+        "latMax": -35.10,
+        "lonMin": -72.50,
+        "lonMax": -70.40
+      }
+    },
+    {
+      "id": "nuble",
+      "nombre": "Ñuble",
+      "bbox": {
+        "latMin": -37.50,
+        "latMax": -36.60,
+        "lonMin": -72.80,
+        "lonMax": -71.00
+      }
+    },
+    {
+      "id": "biobio",
+      "nombre": "Biobío",
+      "bbox": {
+        "latMin": -38.50,
+        "latMax": -37.50,
+        "lonMin": -73.50,
+        "lonMax": -71.00
+      }
+    },
+    {
+      "id": "araucania",
+      "nombre": "La Araucanía",
+      "bbox": {
+        "latMin": -39.60,
+        "latMax": -38.50,
+        "lonMin": -73.60,
+        "lonMax": -71.00
+      }
+    },
+    {
+      "id": "los_rios",
+      "nombre": "Los Ríos",
+      "bbox": {
+        "latMin": -40.50,
+        "latMax": -39.60,
+        "lonMin": -73.80,
+        "lonMax": -71.50
+      }
+    },
+    {
+      "id": "los_lagos",
+      "nombre": "Los Lagos",
+      "bbox": {
+        "latMin": -43.50,
+        "latMax": -40.50,
+        "lonMin": -74.50,
+        "lonMax": -71.50
+      }
+    },
+    {
+      "id": "aysen",
+      "nombre": "Aysén",
+      "bbox": {
+        "latMin": -49.00,
+        "latMax": -43.50,
+        "lonMin": -75.50,
+        "lonMax": -71.00
+      }
+    },
+    {
+      "id": "magallanes",
+      "nombre": "Magallanes",
+      "bbox": {
+        "latMin": -56.00,
+        "latMax": -49.00,
+        "lonMin": -76.00,
+        "lonMax": -66.00
+      }
+    }
+  ]
+}
