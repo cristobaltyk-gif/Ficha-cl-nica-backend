@@ -5,6 +5,7 @@ from typing import Dict, Any
 
 DATA_FILE  = Path("/data/professionals.json")
 USERS_FILE = Path("/data/users.json")
+SEDES_FILE = Path("/data/sedes.json")
 LOCK = Lock()
 
 
@@ -33,6 +34,19 @@ def _read_users() -> Dict[str, Any]:
 def _write_users(data: Dict[str, Any]) -> None:
     USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
     with open(USERS_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+def _read_sedes() -> Dict[str, Any]:
+    if not SEDES_FILE.exists():
+        return {}
+    with open(SEDES_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _write_sedes(data: Dict[str, Any]) -> None:
+    SEDES_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(SEDES_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
@@ -112,11 +126,33 @@ def update_professional(pid: str, updates: Dict[str, Any]):
 
 
 def delete_professional(pid: str):
+    """
+    Elimina profesional de:
+    - professionals.json
+    - users.json (usuario asociado)
+    - sedes.json
+    """
     with LOCK:
+        # 1. Eliminar de professionals.json
         data = _read_json()
         if pid not in data:
             raise ValueError("Profesional no existe")
-        removed = data.pop(pid)
+
+        removed  = data.pop(pid)
+        username = removed.get("username") or pid
         _write_json(data)
-        return removed
-        
+
+        # 2. Eliminar usuario asociado de users.json
+        users = _read_users()
+        if username in users:
+            del users[username]
+            _write_users(users)
+
+        # 3. Eliminar sedes
+        sedes = _read_sedes()
+        if pid in sedes:
+            del sedes[pid]
+            _write_sedes(sedes)
+
+    return removed
+    
