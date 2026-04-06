@@ -74,7 +74,7 @@
       "id": "ohiggins",
       "nombre": "O'Higgins",
       "bbox": {
-        "latMin": -35.10,
+        "latMin": -34.80,
         "latMax": -34.30,
         "lonMin": -71.80,
         "lonMax": -70.00
@@ -85,7 +85,7 @@
       "nombre": "Maule",
       "bbox": {
         "latMin": -36.60,
-        "latMax": -35.10,
+        "latMax": -34.80,
         "lonMin": -72.50,
         "lonMax": -70.40
       }
