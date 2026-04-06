@@ -45,7 +45,7 @@ from modules.contable.contable_router               import router as contable_ro
 from modules.pagos.confirmacion_router              import router as confirmacion_router
 from modules.rrhh.router import router as rrhh_router
 from modules.fichas.prediagnostico_ia_router import router as prediag_ia_router
-
+from core.sedes_router import router as sedes_router
 from core.geo_router import router as geo_router
 
 # ==========================
@@ -101,6 +101,7 @@ app.include_router(contable_router)
 app.include_router(confirmacion_router)
 app.include_router(rrhh_router)
 app.include_router(prediag_ia_router)
+app.include_router(sedes_router)
 app.include_router(geo_router)
 
 # ==========================
