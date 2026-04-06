@@ -46,6 +46,7 @@ from modules.pagos.confirmacion_router              import router as confirmacio
 from modules.rrhh.router import router as rrhh_router
 from modules.fichas.prediagnostico_ia_router import router as prediag_ia_router
 
+from core.geo_router import router as geo_router
 
 # ==========================
 # APP CORE
@@ -100,6 +101,7 @@ app.include_router(contable_router)
 app.include_router(confirmacion_router)
 app.include_router(rrhh_router)
 app.include_router(prediag_ia_router)
+app.include_router(geo_router)
 
 # ==========================
 # HEALTHCHECK
