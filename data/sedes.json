@@ -1,0 +1,38 @@
+{
+  "huerta": {
+    "regiones": {
+      "maule": [
+        {
+          "centro": "Instituto de Cirugía Articular",
+          "direccion": "Avenida España 998, Curicó"
+        }
+      ],
+      "ohiggins": [
+        {
+          "centro": "Clever Salud",
+          "direccion": "Cáceres 60, Rancagua"
+        }
+      ]
+    }
+  },
+  "espinoza": {
+    "regiones": {
+      "maule": [
+        {
+          "centro": "Centro Médico San Martín",
+          "direccion": "Villota 170, Curicó"
+        }
+      ]
+    }
+  },
+  "gcastillo": {
+    "regiones": {
+      "maule": [
+        {
+          "centro": "Instituto de Cirugía Articular",
+          "direccion": "Avenida España 998, Curicó"
+        }
+      ]
+    }
+  }
+}
