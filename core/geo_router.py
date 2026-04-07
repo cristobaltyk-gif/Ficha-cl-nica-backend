@@ -1,5 +1,5 @@
 # core/geo_router.py
-# Resuelve región geográfica desde coordenadas GPS
+# Resuelve región geográfica desde coordenadas GPS o IP
 # Usado por BookingCerebro para filtrar profesionales por región
 
 from __future__ import annotations
@@ -7,8 +7,10 @@ from __future__ import annotations
 import json
 import math
 from pathlib import Path
+from typing import Optional
 
-from fastapi import APIRouter, Query
+import httpx
+from fastapi import APIRouter, Query, Request
 
 # ============================================================
 # CONFIG
@@ -50,12 +52,16 @@ def _centro_bbox(bbox: dict) -> tuple[float, float]:
     )
 
 
+def _get_client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for", "")
+    ip = forwarded.split(",")[0].strip() if forwarded else ""
+    if not ip:
+        ip = getattr(request.client, "host", "") or ""
+    return ip.replace("::ffff:", "")
+
+
 def resolver_region(lat: float, lon: float) -> dict | None:
-    """
-    Resuelve región desde coordenadas GPS.
-    1) Busca dentro de bbox exacto
-    2) Fallback: región más cercana
-    """
+    """Resuelve región desde coordenadas GPS."""
     regiones = _load_regiones()
     if not regiones:
         return None
@@ -81,29 +87,51 @@ def resolver_region(lat: float, lon: float) -> dict | None:
     return None
 
 
+async def _resolver_por_ip(ip: str) -> dict | None:
+    """Resuelve región desde IP usando ipapi.co."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            res  = await client.get(
+                f"https://ipapi.co/{ip}/json/",
+                headers={"User-Agent": "ICA-Backend/1.0"},
+            )
+            data = res.json()
+        lat = data.get("latitude")
+        lon = data.get("longitude")
+        if isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
+            return resolver_region(lat, lon)
+    except Exception:
+        pass
+    return None
+
+
 # ============================================================
 # ENDPOINT
 # ============================================================
 @router.get("/sede")
-def get_sede_por_gps(
-    lat: float = Query(..., description="Latitud GPS"),
-    lon: float = Query(..., description="Longitud GPS"),
+async def get_sede_por_gps(
+    request: Request,
+    lat: Optional[float] = Query(None, description="Latitud GPS"),
+    lon: Optional[float] = Query(None, description="Longitud GPS"),
 ):
     """
-    Recibe coordenadas GPS y devuelve la región correspondiente.
-    Usado por el frontend para filtrar profesionales disponibles.
+    Resuelve región desde GPS o IP.
+    - Con coords → GPS
+    - Sin coords → IP
+    - Sin resultado → ok: false (frontend muestra mensaje de GPS)
     """
-    region = resolver_region(lat, lon)
+    # 1) GPS si viene
+    if lat is not None and lon is not None:
+        region = resolver_region(lat, lon)
+        if region:
+            return {"ok": True, "source": "gps", "region": region["id"], "nombre": region["nombre"]}
 
-    if not region:
-        return {
-            "ok":     False,
-            "region": None,
-        }
+    # 2) Fallback por IP
+    ip = _get_client_ip(request)
+    if ip:
+        region = await _resolver_por_ip(ip)
+        if region:
+            return {"ok": True, "source": "ip", "region": region["id"], "nombre": region["nombre"]}
 
-    return {
-        "ok":     True,
-        "region": region["id"],
-        "nombre": region["nombre"],
-                       }
-  
+    # 3) Sin resultado
+    return {"ok": False, "source": None, "region": None, "nombre": None}
