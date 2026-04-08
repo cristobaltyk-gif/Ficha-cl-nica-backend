@@ -64,7 +64,7 @@
       "id": "metropolitana",
       "nombre": "Región Metropolitana",
       "bbox": {
-        "latMin": -34.30,
+        "latMin": -34.00,
         "latMax": -33.00,
         "lonMin": -71.10,
         "lonMax": -69.80
@@ -74,8 +74,8 @@
       "id": "ohiggins",
       "nombre": "O'Higgins",
       "bbox": {
-        "latMin": -34.80,
-        "latMax": -34.30,
+        "latMin": -35.10,
+        "latMax": -34.00,
         "lonMin": -71.80,
         "lonMax": -70.00
       }
@@ -85,7 +85,7 @@
       "nombre": "Maule",
       "bbox": {
         "latMin": -36.60,
-        "latMax": -34.80,
+        "latMax": -35.10,
         "lonMin": -72.50,
         "lonMax": -70.40
       }
