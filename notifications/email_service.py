@@ -76,8 +76,8 @@ def enviar_confirmacion_reserva(
     fecha: str,
     hora: str,
     profesional_nombre: str,
-    edad_paciente: int | None = None,   # ← NUEVO
-    sexo_paciente: str = "",            # ← NUEVO
+    edad_paciente: int | None = None,
+    sexo_paciente: str = "",
 ) -> bool:
     _init()
 
@@ -179,7 +179,90 @@ def enviar_confirmacion_gratuito(
 
 
 # ======================================================
-# 3. DOCUMENTOS DE ATENCIÓN
+# 3. CONFIRMACIÓN SOBRE CUPO
+# ======================================================
+
+def enviar_confirmacion_sobrecupo(
+    *,
+    email_paciente: str,
+    nombre_paciente: str,
+    fecha: str,
+    hora: str,
+    profesional_nombre: str,
+    token: str,
+    gratuito: bool = False,
+) -> bool:
+    _init()
+
+    link = f"{BACKEND_URL}/api/sobrecupo/confirmar?token={token}"
+
+    if gratuito:
+        badge_color  = "#16a34a"
+        badge_bg     = "#f0fdf4"
+        badge_border = "#86efac"
+        badge_texto  = "Esta atención no tiene costo para usted."
+        asunto       = f"ICA — Sobre cupo sin costo · {fecha} {hora}"
+        titulo       = "Confirmación de sobre cupo gratuito"
+        btn_texto    = "✓ Confirmar sobre cupo gratuito"
+    else:
+        badge_color  = "#1d4ed8"
+        badge_bg     = "#eff6ff"
+        badge_border = "#bfdbfe"
+        badge_texto  = "Esta atención tiene el valor normal de consulta."
+        asunto       = f"ICA — Sobre cupo agendado · {fecha} {hora}"
+        titulo       = "Confirmación de sobre cupo"
+        btn_texto    = "✓ Confirmar sobre cupo"
+
+    html = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; background: #fff;">
+        <img src="{LOGO_URL}" alt="Instituto de Cirugía Articular" style="height: 60px; margin-bottom: 24px;" />
+        <h2 style="color: #0f172a;">{titulo}</h2>
+        <p>Estimado/a <strong>{nombre_paciente}</strong>,</p>
+        <p>Se ha agendado un <strong>sobre cupo</strong> para usted fuera del horario habitual.
+        Por favor confirme su asistencia haciendo click en el botón:</p>
+        <a href="{link}" style="
+            display: inline-block;
+            background: #0f172a;
+            color: white;
+            padding: 14px 28px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: bold;
+            font-size: 15px;
+            margin: 20px 0;
+        ">{btn_texto}</a>
+        <div style="background: {badge_bg}; border: 1px solid {badge_border}; border-radius: 8px; padding: 16px; margin: 20px 0;">
+            <p style="margin: 4px 0;"><strong>Fecha:</strong> {fecha}</p>
+            <p style="margin: 4px 0;"><strong>Hora:</strong> {hora}</p>
+            <p style="margin: 4px 0;"><strong>Profesional:</strong> {profesional_nombre}</p>
+            <p style="margin: 4px 0; color: {badge_color}; font-weight: bold;">{badge_texto}</p>
+            <p style="margin: 8px 0 0; font-size: 12px; color: #64748b;">
+                ⏳ Esta hora está pendiente de aprobación final por el médico.
+            </p>
+        </div>
+        <p>Por favor llegue 10 minutos antes de su hora.</p>
+        <p style="color: #64748b; font-size: 12px; margin-top: 24px;">
+            Si no solicitó esta atención, ignore este mensaje.<br/>
+            Instituto de Cirugía Articular — Curicó, Chile
+        </p>
+    </div>
+    """
+
+    try:
+        resend.Emails.send({
+            "from":    FROM_EMAIL,
+            "to":      [email_paciente],
+            "subject": asunto,
+            "html":    html
+        })
+        return True
+    except Exception as e:
+        print(f"❌ ERROR EMAIL sobrecupo: {e}")
+        return False
+
+
+# ======================================================
+# 4. DOCUMENTOS DE ATENCIÓN
 # ======================================================
 
 def enviar_documentos_atencion(
@@ -233,3 +316,4 @@ def enviar_documentos_atencion(
     except Exception as e:
         print(f"❌ ERROR EMAIL documentos: {e}")
         return False
+    
