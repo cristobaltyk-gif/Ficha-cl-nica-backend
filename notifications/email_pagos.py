@@ -5,6 +5,7 @@ Emails relacionados a confirmación de asistencia y pagos Flow.
 
 import os
 import resend
+from datetime import date
 
 RESEND_API_KEY = os.getenv("RESEND_API_KEY")
 FROM_EMAIL     = "Instituto de Cirugía Articular <contacto@icarticular.cl>"
@@ -12,11 +13,29 @@ BACKEND_URL    = os.getenv("BACKEND_URL", "https://services.icarticular.cl")
 
 LOGO_URL = "https://lh3.googleusercontent.com/sitesv/APaQ0SSMBWniO2NWVDwGoaCaQjiel3lBKrmNgpaZZY-ZsYzTawYaf-_7Ad-xfeKVyfCqxa7WgzhWPKHtdaCS0jGtFRrcseP-R8KG1LfY2iYuhZeClvWEBljPLh9KANIClyKSsiSJH8_of4LPUOJUl7cWNwB2HKR7RVH_xB_h9BG-8Nr9jnorb-q2gId2=w300"
 
+DIAS_ES   = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+MESES_ES  = ["enero", "febrero", "marzo", "abril", "mayo", "junio",
+             "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
+
 
 def _init():
     if not RESEND_API_KEY:
         raise RuntimeError("Falta variable RESEND_API_KEY")
     resend.api_key = RESEND_API_KEY
+
+
+def _formato_fecha_legible(fecha_iso: str) -> str:
+    """
+    Convierte "2026-04-13" → "lunes 13 de abril"
+    Nunca dice "mañana" — siempre muestra el día real.
+    """
+    try:
+        d = date.fromisoformat(fecha_iso)
+        dia_semana = DIAS_ES[d.weekday()]
+        mes        = MESES_ES[d.month - 1]
+        return f"{dia_semana} {d.day} de {mes}"
+    except Exception:
+        return fecha_iso
 
 
 # ======================================================
@@ -36,8 +55,9 @@ def enviar_confirmacion_asistencia(
 ) -> bool:
     _init()
 
-    link = f"{BACKEND_URL}/api/confirmar-asistencia?token={token}"
-    monto_str = "Sin costo" if es_gratuito else f"${monto:,}".replace(",", ".")
+    link       = f"{BACKEND_URL}/api/confirmar-asistencia?token={token}"
+    monto_str  = "Sin costo" if es_gratuito else f"${monto:,}".replace(",", ".")
+    fecha_text = _formato_fecha_legible(fecha)
 
     pago_html = "" if es_gratuito else f"""
         <p style="margin-top: 12px;">Valor de la consulta: <strong>{monto_str}</strong></p>
@@ -49,11 +69,11 @@ def enviar_confirmacion_asistencia(
     html = f"""
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; background: #fff;">
         <img src="{LOGO_URL}" alt="ICA" style="height: 60px; margin-bottom: 24px;" />
-        <h2 style="color: #0f172a;">Recuerde su cita de mañana</h2>
+        <h2 style="color: #0f172a;">Recuerde su cita del {fecha_text}</h2>
         <p>Estimado/a <strong>{nombre_paciente}</strong>,</p>
-        <p>Le recordamos que tiene una cita programada para mañana:</p>
+        <p>Le recordamos que tiene una cita programada para el <strong>{fecha_text}</strong>:</p>
         <div style="background: #f0fdf4; border: 1px solid #86efac; border-radius: 8px; padding: 16px; margin: 20px 0;">
-            <p style="margin: 4px 0;"><strong>Fecha:</strong> {fecha}</p>
+            <p style="margin: 4px 0;"><strong>Fecha:</strong> {fecha_text}</p>
             <p style="margin: 4px 0;"><strong>Hora:</strong> {hora}</p>
             <p style="margin: 4px 0;"><strong>Profesional:</strong> {profesional_nombre}</p>
             {"<p style='margin: 4px 0; color: #16a34a; font-weight: bold;'>Atención sin costo</p>" if es_gratuito else ""}
@@ -82,7 +102,7 @@ def enviar_confirmacion_asistencia(
         resend.Emails.send({
             "from":    FROM_EMAIL,
             "to":      [email_paciente],
-            "subject": f"ICA — Recuerde su cita mañana {fecha} {hora}",
+            "subject": f"ICA — Recuerde su cita del {fecha_text} · {hora}",
             "html":    html
         })
         return True
@@ -107,6 +127,8 @@ def enviar_confirmacion_pago(
 ) -> bool:
     _init()
 
+    fecha_text = _formato_fecha_legible(fecha)
+
     html = f"""
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; background: #fff;">
         <img src="{LOGO_URL}" alt="ICA" style="height: 60px; margin-bottom: 24px;" />
@@ -114,10 +136,10 @@ def enviar_confirmacion_pago(
         <p>Estimado/a <strong>{nombre_paciente}</strong>,</p>
         <p>Su pago ha sido procesado exitosamente:</p>
         <div style="background: #f0fdf4; border: 1px solid #86efac; border-radius: 8px; padding: 16px; margin: 20px 0;">
-            <p style="margin: 4px 0;"><strong>Fecha cita:</strong> {fecha}</p>
+            <p style="margin: 4px 0;"><strong>Fecha cita:</strong> {fecha_text}</p>
             <p style="margin: 4px 0;"><strong>Hora:</strong> {hora}</p>
             <p style="margin: 4px 0;"><strong>Profesional:</strong> {profesional_nombre}</p>
-            <p style="margin: 4px 0;"><strong>Monto pagado:</strong> ${monto:,}".replace(",", ".")</p>
+            <p style="margin: 4px 0;"><strong>Monto pagado:</strong> ${monto:,}</p>
             <p style="margin: 4px 0;"><strong>N° orden:</strong> {numero_orden}</p>
         </div>
         <p>Le esperamos en el Instituto de Cirugía Articular. Por favor llegue 10 minutos antes.</p>
@@ -131,11 +153,11 @@ def enviar_confirmacion_pago(
         resend.Emails.send({
             "from":    FROM_EMAIL,
             "to":      [email_paciente],
-            "subject": f"ICA — Pago confirmado · {fecha} {hora}",
+            "subject": f"ICA — Pago confirmado · {fecha_text} {hora}",
             "html":    html
         })
         return True
     except Exception as e:
         print(f"❌ ERROR EMAIL pago: {e}")
         return False
-  
+    
