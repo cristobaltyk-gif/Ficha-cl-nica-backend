@@ -1,17 +1,12 @@
 """
 modules/control/control_sobrecupo_router.py
-
-Sobre cupo — slot adicional fuera del horario normal.
-- Secretaria o médico lo crea para cualquier paciente
-- Puede ser con costo o gratuito
-- Médico siempre debe confirmar (igual que control gratuito)
-- Paciente recibe email de confirmación con token
 """
 
 from __future__ import annotations
 
 import json
 import secrets
+import os
 from pathlib import Path
 from datetime import datetime, timezone
 from threading import Lock
@@ -24,6 +19,7 @@ from typing import Optional
 from auth.internal_auth import require_internal_auth
 from agenda.store import load_store, save_store
 from notifications.email_service import enviar_confirmacion_sobrecupo
+from modules.pagos.flow_client import crear_pago
 
 router = APIRouter(prefix="/api/sobrecupo", tags=["Sobre Cupo"])
 
@@ -31,6 +27,10 @@ TOKENS_PATH        = Path("/data/sobrecupo_tokens.json")
 PROFESSIONALS_PATH = Path("/data/professionals.json")
 LOCK               = Lock()
 BASE_PACIENTES     = Path("/data/pacientes")
+
+BACKEND_URL = os.getenv("BACKEND_URL", "https://services.icarticular.cl")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://reservas.icarticular.cl")
+VALOR_CONSULTA = int(os.getenv("VALOR_CONSULTA", "50000"))
 
 
 # ============================================================
@@ -88,10 +88,6 @@ def _load_admin(rut: str) -> dict | None:
 
 
 def _can_manage(user: dict, professional: str) -> bool:
-    """
-    Secretaria puede gestionar cualquier profesional.
-    Médico solo puede gestionar su propio profesional.
-    """
     role_name = user.get("role", {}).get("name", "")
     if role_name == "secretaria":
         return True
@@ -127,7 +123,7 @@ class AceptarSobrecupoRequest(BaseModel):
 
 
 # ============================================================
-# 1. SECRETARIA O MÉDICO — crea sobre cupo + envía email
+# 1. CREAR SOBRE CUPO
 # ============================================================
 
 @router.post("")
@@ -135,14 +131,9 @@ def crear_sobrecupo(
     data: CrearSobrecupoRequest,
     user=Depends(require_internal_auth)
 ):
-    # Validar atribuciones
     if not _can_manage(user, data.professional):
-        raise HTTPException(
-            status_code=403,
-            detail="Solo puede gestionar su propio profesional"
-        )
+        raise HTTPException(status_code=403, detail="Solo puede gestionar su propio profesional")
 
-    # Cargar ficha del paciente
     admin = _load_admin(data.rut)
     if not admin:
         raise HTTPException(status_code=404, detail="Ficha del paciente no encontrada")
@@ -154,31 +145,25 @@ def crear_sobrecupo(
     with LOCK:
         store = load_store()
 
-        # Verificar que el slot no exista ya
         existing = _get_slot(store, data.date, data.professional, data.time)
         if existing and existing.get("status") not in ("available", None, ""):
-            raise HTTPException(
-                status_code=409,
-                detail=f"Ya existe un slot en {data.date} {data.time} para este profesional"
-            )
+            raise HTTPException(status_code=409, detail=f"Ya existe un slot en {data.date} {data.time}")
 
         token = secrets.token_urlsafe(32)
 
-        # Crear slot sobre cupo
         _set_slot_field(store, data.date, data.professional, data.time, {
-            "status":                 "reserved",
-            "rut":                    data.rut,
-            "sobrecupo":              True,
-            "sobrecupo_gratuito":     data.gratuito,
-            "sobrecupo_confirmado":   False,   # paciente confirma
-            "sobrecupo_aceptado":     False,   # médico acepta
-            "sobrecupo_token":        token,
-            "sobrecupo_creado_por":   user["usuario"],
-            "sobrecupo_creado_at":    datetime.now(timezone.utc).isoformat(),
+            "status":               "reserved",
+            "rut":                  data.rut,
+            "sobrecupo":            True,
+            "sobrecupo_gratuito":   data.gratuito,
+            "sobrecupo_confirmado": False,
+            "sobrecupo_aceptado":   False,
+            "sobrecupo_token":      token,
+            "sobrecupo_creado_por": user["usuario"],
+            "sobrecupo_creado_at":  datetime.now(timezone.utc).isoformat(),
         })
         save_store(store)
 
-        # Guardar token
         tokens = _load_tokens()
         tokens[token] = {
             "date":         data.date,
@@ -193,21 +178,63 @@ def crear_sobrecupo(
     nombre_paciente    = f"{admin.get('nombre', '')} {admin.get('apellido_paterno', '')}".strip()
     nombre_profesional = _get_professional_name(data.professional)
 
+    # ── Generar link Flow si no es gratuito ─────────────────
+    payment_url = None
+    if not data.gratuito:
+        try:
+            id_pago = f"SC-{data.professional}-{data.date}-{data.time}-{token[:8]}"
+            flow    = crear_pago(
+                id_pago          = id_pago,
+                amount           = VALOR_CONSULTA,
+                subject          = f"Sobre cupo {nombre_profesional} {data.date} {data.time}",
+                email            = email,
+                url_confirmation = f"{BACKEND_URL}/api/sobrecupo/pago/confirmar",
+                url_return       = f"{FRONTEND_URL}/pago-sobrecupo?token={token}",
+                optional_data    = {
+                    "token_sobrecupo": token,
+                    "professional":    data.professional,
+                    "date":            data.date,
+                    "time":            data.time,
+                },
+            )
+            payment_url = f"{flow['url']}?token={flow['token']}"
+
+            # Guardar flow_token en el slot
+            with LOCK:
+                store = load_store()
+                _set_slot_field(store, data.date, data.professional, data.time, {
+                    "flow_token":    flow["token"],
+                    "flow_order":    flow.get("flowOrder"),
+                    "payment_url":   payment_url,
+                })
+                save_store(store)
+
+        except Exception as e:
+            # No bloqueamos la creación si Flow falla — loguear y continuar
+            print(f"[sobrecupo] Error Flow: {e}")
+
+    # ── Enviar email ─────────────────────────────────────────
     ok = enviar_confirmacion_sobrecupo(
-        email_paciente=email,
-        nombre_paciente=nombre_paciente,
-        fecha=data.date,
-        hora=data.time,
-        profesional_nombre=nombre_profesional,
-        token=token,
-        gratuito=data.gratuito,
+        email_paciente     = email,
+        nombre_paciente    = nombre_paciente,
+        fecha              = data.date,
+        hora               = data.time,
+        profesional_nombre = nombre_profesional,
+        token              = token,
+        gratuito           = data.gratuito,
+        payment_url        = payment_url,
     )
 
-    return {"ok": True, "email_enviado": ok, "email": email}
+    return {
+        "ok":           True,
+        "email_enviado": ok,
+        "email":        email,
+        "payment_url":  payment_url,
+    }
 
 
 # ============================================================
-# 2. PACIENTE — confirma via link → responde HTML
+# 2. PACIENTE — confirma via link
 # ============================================================
 
 @router.get("/confirmar", response_class=HTMLResponse)
@@ -218,8 +245,7 @@ def confirmar_sobrecupo(token: str):
 
         if not ref:
             return HTMLResponse(content=_html_page(
-                titulo="Enlace inválido",
-                mensaje="Este enlace ya fue usado o ha expirado.",
+                titulo="Enlace inválido", mensaje="Este enlace ya fue usado o ha expirado.",
                 color="#ef4444", icono="❌"
             ), status_code=404)
 
@@ -228,15 +254,13 @@ def confirmar_sobrecupo(token: str):
 
         if not slot:
             return HTMLResponse(content=_html_page(
-                titulo="Cita no encontrada",
-                mensaje="No se encontró la cita asociada a este enlace.",
+                titulo="Cita no encontrada", mensaje="No se encontró la cita asociada.",
                 color="#ef4444", icono="❌"
             ), status_code=404)
 
         if slot.get("sobrecupo_confirmado"):
             return HTMLResponse(content=_html_page(
-                titulo="Ya confirmado",
-                mensaje="Su sobre cupo ya fue confirmado anteriormente. ¡Gracias!",
+                titulo="Ya confirmado", mensaje="Su sobre cupo ya fue confirmado. ¡Gracias!",
                 color="#16a34a", icono="✅"
             ))
 
@@ -244,23 +268,63 @@ def confirmar_sobrecupo(token: str):
             "sobrecupo_confirmado": True,
         })
         save_store(store)
-
         del tokens[token]
         _save_tokens(tokens)
 
     tipo = "gratuita" if ref.get("gratuito") else "con el valor normal de consulta"
     return HTMLResponse(content=_html_page(
         titulo="¡Confirmado!",
-        mensaje=(
-            f"Su sobre cupo del {ref['date']} a las {ref['time']} ha sido confirmado. "
-            f"La atención será {tipo}. El médico ha sido notificado para su aprobación final."
-        ),
+        mensaje=f"Su sobre cupo del {ref['date']} a las {ref['time']} fue confirmado. La atención será {tipo}. El médico ha sido notificado.",
         color="#16a34a", icono="✅"
     ))
 
 
 # ============================================================
-# 3. MÉDICO — acepta sobre cupo
+# 3. FLOW — confirmación de pago (webhook)
+# ============================================================
+
+@router.post("/pago/confirmar")
+async def confirmar_pago_flow(request):
+    from fastapi import Request
+    body = await request.form()
+    flow_token = body.get("token")
+    if not flow_token:
+        raise HTTPException(status_code=400, detail="Token Flow requerido")
+
+    from modules.pagos.flow_client import obtener_estado_pago
+    estado = obtener_estado_pago(flow_token)
+
+    # status 2 = pagado
+    if estado.get("status") != 2:
+        return {"ok": False, "status": estado.get("status")}
+
+    optional = estado.get("optional", {})
+    if isinstance(optional, str):
+        import json as _json
+        optional = _json.loads(optional)
+
+    token_sobrecupo = optional.get("token_sobrecupo")
+    professional    = optional.get("professional")
+    date            = optional.get("date")
+    time            = optional.get("time")
+
+    if not all([token_sobrecupo, professional, date, time]):
+        raise HTTPException(status_code=400, detail="Datos incompletos en optional")
+
+    with LOCK:
+        store = load_store()
+        _set_slot_field(store, date, professional, time, {
+            "sobrecupo_confirmado": True,
+            "pago_confirmado":      True,
+            "pago_confirmado_at":   datetime.now(timezone.utc).isoformat(),
+        })
+        save_store(store)
+
+    return {"ok": True}
+
+
+# ============================================================
+# 4. MÉDICO — acepta sobre cupo
 # ============================================================
 
 @router.post("/aceptar")
@@ -269,10 +333,7 @@ def aceptar_sobrecupo(
     user=Depends(require_internal_auth)
 ):
     if not _can_manage(user, data.professional):
-        raise HTTPException(
-            status_code=403,
-            detail="Solo puede gestionar su propio profesional"
-        )
+        raise HTTPException(status_code=403, detail="Solo puede gestionar su propio profesional")
 
     with LOCK:
         store = load_store()
@@ -296,7 +357,7 @@ def aceptar_sobrecupo(
 
 
 # ============================================================
-# 4. SECRETARIA O MÉDICO — edita fecha/hora del sobre cupo
+# 5. EDITAR SOBRE CUPO
 # ============================================================
 
 @router.put("/editar")
@@ -305,10 +366,7 @@ def editar_sobrecupo(
     user=Depends(require_internal_auth)
 ):
     if not _can_manage(user, data.professional):
-        raise HTTPException(
-            status_code=403,
-            detail="Solo puede gestionar su propio profesional"
-        )
+        raise HTTPException(status_code=403, detail="Solo puede gestionar su propio profesional")
 
     if not data.new_date and not data.new_time:
         raise HTTPException(status_code=400, detail="Debe indicar nueva fecha o nueva hora")
@@ -326,38 +384,27 @@ def editar_sobrecupo(
         new_time = data.new_time or data.time
 
         if new_date == data.date and new_time == data.time:
-            raise HTTPException(status_code=400, detail="La fecha y hora son iguales a las actuales")
+            raise HTTPException(status_code=400, detail="La fecha y hora son iguales")
 
-        # Verificar que el nuevo slot no exista
         existing = _get_slot(store, new_date, data.professional, new_time)
         if existing and existing.get("status") not in ("available", None, ""):
-            raise HTTPException(
-                status_code=409,
-                detail=f"Ya existe un slot en {new_date} {new_time}"
-            )
+            raise HTTPException(status_code=409, detail=f"Ya existe un slot en {new_date} {new_time}")
 
-        # Mover slot — copiar a nueva posición y eliminar la anterior
         slot_data = dict(slot)
-        slot_data["sobrecupo_editado_por"] = user["usuario"]
-        slot_data["sobrecupo_editado_at"]  = datetime.now(timezone.utc).isoformat()
-        slot_data["sobrecupo_confirmado"]  = False  # reset — paciente debe reconfirmar
-        slot_data["sobrecupo_aceptado"]    = False
+        slot_data.update({
+            "sobrecupo_editado_por": user["usuario"],
+            "sobrecupo_editado_at":  datetime.now(timezone.utc).isoformat(),
+            "sobrecupo_confirmado":  False,
+            "sobrecupo_aceptado":    False,
+        })
 
         _set_slot_field(store, new_date, data.professional, new_time, slot_data)
-
-        # Eliminar slot anterior
         del store["calendar"][data.date][data.professional]["slots"][data.time]
-
         save_store(store)
 
-        # Actualizar token con nueva fecha/hora
         tokens = _load_tokens()
         for t, ref in tokens.items():
-            if (
-                ref["date"] == data.date and
-                ref["time"] == data.time and
-                ref["professional"] == data.professional
-            ):
+            if ref["date"] == data.date and ref["time"] == data.time and ref["professional"] == data.professional:
                 ref["date"] = new_date
                 ref["time"] = new_time
                 break
@@ -379,24 +426,8 @@ def _html_page(titulo: str, mensaje: str, color: str, icono: str) -> str:
   <title>Instituto de Cirugía Articular</title>
   <style>
     * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-    body {{
-      font-family: 'Helvetica Neue', Arial, sans-serif;
-      background: #f8fafc;
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 24px;
-    }}
-    .card {{
-      background: #fff;
-      border-radius: 16px;
-      padding: 40px 32px;
-      max-width: 420px;
-      width: 100%;
-      text-align: center;
-      box-shadow: 0 4px 24px rgba(0,0,0,0.08);
-    }}
+    body {{ font-family: 'Helvetica Neue', Arial, sans-serif; background: #f8fafc; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }}
+    .card {{ background: #fff; border-radius: 16px; padding: 40px 32px; max-width: 420px; width: 100%; text-align: center; box-shadow: 0 4px 24px rgba(0,0,0,0.08); }}
     .logo {{ height: 50px; margin-bottom: 24px; }}
     .icono {{ font-size: 52px; margin-bottom: 20px; }}
     .titulo {{ font-size: 22px; font-weight: 700; color: {color}; margin-bottom: 12px; }}
@@ -414,4 +445,4 @@ def _html_page(titulo: str, mensaje: str, color: str, icono: str) -> str:
   </div>
 </body>
 </html>"""
-  
+        
