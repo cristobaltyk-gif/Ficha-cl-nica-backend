@@ -264,9 +264,12 @@ def confirmar_sobrecupo(token: str):
                 color="#16a34a", icono="✅"
             ))
 
-        _set_slot_field(store, ref["date"], ref["professional"], ref["time"], {
-            "sobrecupo_confirmado": True,
-        })
+        try:
+            store["calendar"][ref["date"]][ref["professional"]]["slots"][ref["time"]]["sobrecupo_confirmado"] = True
+        except KeyError:
+            _set_slot_field(store, ref["date"], ref["professional"], ref["time"], {
+                "sobrecupo_confirmado": True,
+            })
         save_store(store)
         del tokens[token]
         _save_tokens(tokens)
@@ -445,4 +448,3 @@ def _html_page(titulo: str, mensaje: str, color: str, icono: str) -> str:
   </div>
 </body>
 </html>"""
-                                
