@@ -9,6 +9,8 @@ from pathlib import Path
 from datetime import datetime, date as date_type
 from collections import defaultdict
 
+from modules.caja.caja_config_helper import get_tipos_profesional, get_valor_tipo
+
 router = APIRouter(prefix="/api/caja", tags=["Caja"])
 
 CAJA_DIR    = Path("/data/caja")
@@ -18,9 +20,9 @@ CONFIG_PATH = Path(os.path.dirname(__file__)) / "caja_config.json"
 
 TIPOS_VALIDOS = {
     "particular", "control_costo", "control_gratuito",
-    "sobrecupo", "cortesia", "kinesiologia"
+    "sobrecupo", "kinesiologia", "paquete_10"
 }
-TIPOS_GRATUITOS = {"control_gratuito", "cortesia"}
+TIPOS_GRATUITOS = {"control_gratuito"}
 ESTADOS_VALIDOS = {"waiting", "paid"}
 METODOS_VALIDOS = {"efectivo", "transferencia", "tarjeta"}
 
@@ -29,8 +31,8 @@ TIPOS_LABELS = {
     "control_costo":    "Control con costo",
     "control_gratuito": "Control gratuito",
     "sobrecupo":        "Sobrecupo",
-    "cortesia":         "Cortesía",
     "kinesiologia":     "Kinesiología",
+    "paquete_10":       "Paquete 10 sesiones",
 }
 
 # =========================
@@ -150,8 +152,11 @@ class AnulacionCreate(BaseModel):
 # =========================
 
 @router.get("/config")
-def get_config():
-    return _load_config()
+def get_config(professional: Optional[str] = Query(None)):
+    if professional:
+        return get_tipos_profesional(professional)
+    config = _load_config()
+    return {k: v for k, v in config.items() if k != "por_profesional"}
 
 # =========================
 # GET — panel del día
@@ -161,7 +166,6 @@ def get_config():
 def get_caja_day(date: str, professional: str):
     agenda_slots = _load_agenda_day(date, professional)
     caja         = _load_caja_day(date, professional)
-    config       = _load_config()
 
     result = []
     for time, slot in agenda_slots.items():
@@ -169,7 +173,7 @@ def get_caja_day(date: str, professional: str):
             continue
         cs    = caja.get(time, {})
         tipo  = cs.get("tipo_atencion", "particular")
-        monto = config.get(tipo, 0)
+        monto = get_valor_tipo(professional, tipo)
         result.append({
             "time":           time,
             "rut":            slot.get("rut", ""),
@@ -198,9 +202,8 @@ def update_caja_slot(data: CajaUpdate):
     if data.arrival_status is not None:
         cs["arrival_status"] = data.arrival_status
     if data.tipo_atencion is not None:
-        config = _load_config()
         cs["tipo_atencion"] = data.tipo_atencion
-        cs["monto"]         = config.get(data.tipo_atencion, 0)
+        cs["monto"]         = get_valor_tipo(data.professional, data.tipo_atencion)
         cs["es_gratuito"]   = data.tipo_atencion in TIPOS_GRATUITOS
     if data.pagado is not None:
         cs["pagado"] = data.pagado
@@ -234,8 +237,7 @@ def registrar_pago(data: PagoCreate):
         if data.metodo_pago in ("transferencia", "tarjeta") and not data.numero_operacion:
             raise HTTPException(status_code=400, detail="numero_operacion requerido")
 
-    config = _load_config()
-    monto  = config.get(data.tipo_atencion, 0)
+    monto = get_valor_tipo(data.professional, data.tipo_atencion)
 
     _save_pago(data.date, data.professional, data.time, {
         "rut":              data.rut,
@@ -287,7 +289,6 @@ def anular_pago(data: AnulacionCreate):
 
     _delete_caja_slot(data.date, data.professional, data.time)
     return {"ok": True}
-
 # =========================
 # GET — resumen día (un profesional)
 # =========================
@@ -408,46 +409,42 @@ def get_resumen_mes(month: str):
                 tipo  = pago.get("tipo_atencion", "")
                 met   = pago.get("metodo_pago") or "gratuito"
 
-                monto_total += monto
-                total_pagos += 1
-                por_dia[date_key]     += monto
-                por_prof[prof]["monto"] += monto
-                por_prof[prof]["pagos"] += 1
+                monto_total              += monto
+                total_pagos              += 1
+                por_dia[date_key]        += monto
+                por_prof[prof]["monto"]  += monto
+                por_prof[prof]["pagos"]  += 1
                 por_tipo[TIPOS_LABELS.get(tipo, tipo)]["count"] += 1
                 por_tipo[TIPOS_LABELS.get(tipo, tipo)]["monto"] += monto
                 por_metodo[met]["count"] += 1
                 por_metodo[met]["monto"] += monto
 
                 pagos_list.append({
-                    "date":           date_key,
-                    "time":           time,
-                    "professional":   prof,
-                    "rut":            pago.get("rut", ""),
-                    "tipo_atencion":  TIPOS_LABELS.get(tipo, tipo),
-                    "monto":          monto,
-                    "metodo_pago":    met,
-                    "es_gratuito":    pago.get("es_gratuito", False),
-                    "pagado_at":      pago.get("pagado_at"),
-                    "pagado_por":     pago.get("pagado_por"),
+                    "date":          date_key,
+                    "time":          time,
+                    "professional":  prof,
+                    "rut":           pago.get("rut", ""),
+                    "tipo_atencion": TIPOS_LABELS.get(tipo, tipo),
+                    "monto":         monto,
+                    "metodo_pago":   met,
+                    "es_gratuito":   pago.get("es_gratuito", False),
+                    "pagado_at":     pago.get("pagado_at"),
+                    "pagado_por":    pago.get("pagado_por"),
                 })
 
     pagos_list.sort(key=lambda x: (x["date"], x["time"]))
-
-    por_dia_list = [
-        {"date": d, "monto": m}
-        for d, m in sorted(por_dia.items())
-    ]
+    por_dia_list = [{"date": d, "monto": m} for d, m in sorted(por_dia.items())]
 
     return {
-        "month":          month,
-        "monto_total":    monto_total,
-        "total_pagos":    total_pagos,
-        "total_anulados": total_anulados,
-        "por_dia":        por_dia_list,
+        "month":           month,
+        "monto_total":     monto_total,
+        "total_pagos":     total_pagos,
+        "total_anulados":  total_anulados,
+        "por_dia":         por_dia_list,
         "por_profesional": dict(por_prof),
-        "por_tipo":       dict(por_tipo),
-        "por_metodo":     dict(por_metodo),
-        "pagos":          pagos_list,
+        "por_tipo":        dict(por_tipo),
+        "por_metodo":      dict(por_metodo),
+        "pagos":           pagos_list,
     }
 
 # =========================
@@ -462,12 +459,11 @@ def get_pdf_mes(month: str):
         from reportlab.lib.units import cm
         from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-        from reportlab.lib.enums import TA_CENTER, TA_RIGHT
+        from reportlab.lib.enums import TA_CENTER
     except ImportError:
         raise HTTPException(status_code=500, detail="reportlab no instalado")
 
-    data = get_resumen_mes(month)
-
+    data   = get_resumen_mes(month)
     buf    = io.BytesIO()
     doc    = SimpleDocTemplate(buf, pagesize=A4,
                                leftMargin=2*cm, rightMargin=2*cm,
@@ -475,13 +471,9 @@ def get_pdf_mes(month: str):
     styles = getSampleStyleSheet()
     story  = []
 
-    title_style = ParagraphStyle("title", parent=styles["Heading1"],
-                                 fontSize=16, spaceAfter=4, alignment=TA_CENTER)
-    sub_style   = ParagraphStyle("sub", parent=styles["Normal"],
-                                 fontSize=10, spaceAfter=12, alignment=TA_CENTER,
-                                 textColor=colors.grey)
-    section_style = ParagraphStyle("section", parent=styles["Heading2"],
-                                   fontSize=12, spaceBefore=16, spaceAfter=6)
+    title_style   = ParagraphStyle("title",   parent=styles["Heading1"], fontSize=16, spaceAfter=4,  alignment=TA_CENTER)
+    sub_style     = ParagraphStyle("sub",     parent=styles["Normal"],   fontSize=10, spaceAfter=12, alignment=TA_CENTER, textColor=colors.grey)
+    section_style = ParagraphStyle("section", parent=styles["Heading2"], fontSize=12, spaceBefore=16, spaceAfter=6)
 
     story.append(Paragraph("Instituto de Cirugía Articular", title_style))
     story.append(Paragraph(f"Resumen contable — {month}", sub_style))
@@ -490,24 +482,20 @@ def get_pdf_mes(month: str):
     # KPIs
     kpi_data = [
         ["Total recaudado", "Total pagos", "Anulados"],
-        [
-            _format_monto(data["monto_total"]),
-            str(data["total_pagos"]),
-            str(data["total_anulados"]),
-        ]
+        [_format_monto(data["monto_total"]), str(data["total_pagos"]), str(data["total_anulados"])]
     ]
     kpi_table = Table(kpi_data, colWidths=[5.5*cm, 5.5*cm, 5.5*cm])
     kpi_table.setStyle(TableStyle([
-        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#0f172a")),
-        ("TEXTCOLOR",  (0,0), (-1,0), colors.white),
-        ("FONTSIZE",   (0,0), (-1,0), 10),
-        ("FONTSIZE",   (0,1), (-1,1), 13),
-        ("FONTNAME",   (0,1), (-1,1), "Helvetica-Bold"),
-        ("ALIGN",      (0,0), (-1,-1), "CENTER"),
-        ("VALIGN",     (0,0), (-1,-1), "MIDDLE"),
+        ("BACKGROUND",     (0,0), (-1,0), colors.HexColor("#0f172a")),
+        ("TEXTCOLOR",      (0,0), (-1,0), colors.white),
+        ("FONTSIZE",       (0,0), (-1,0), 10),
+        ("FONTSIZE",       (0,1), (-1,1), 13),
+        ("FONTNAME",       (0,1), (-1,1), "Helvetica-Bold"),
+        ("ALIGN",          (0,0), (-1,-1), "CENTER"),
+        ("VALIGN",         (0,0), (-1,-1), "MIDDLE"),
         ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.HexColor("#f8fafc")]),
-        ("GRID",       (0,0), (-1,-1), 0.5, colors.HexColor("#e2e8f0")),
-        ("ROWHEIGHT",  (0,0), (-1,-1), 28),
+        ("GRID",           (0,0), (-1,-1), 0.5, colors.HexColor("#e2e8f0")),
+        ("ROWHEIGHT",      (0,0), (-1,-1), 28),
     ]))
     story.append(kpi_table)
     story.append(Spacer(1, 0.5*cm))
@@ -519,13 +507,13 @@ def get_pdf_mes(month: str):
         prof_data.append([prof, str(vals["pagos"]), _format_monto(vals["monto"])])
     prof_table = Table(prof_data, colWidths=[8*cm, 4*cm, 4.5*cm])
     prof_table.setStyle(TableStyle([
-        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#1e40af")),
-        ("TEXTCOLOR",  (0,0), (-1,0), colors.white),
-        ("FONTSIZE",   (0,0), (-1,-1), 9),
-        ("ALIGN",      (1,0), (-1,-1), "CENTER"),
+        ("BACKGROUND",     (0,0), (-1,0), colors.HexColor("#1e40af")),
+        ("TEXTCOLOR",      (0,0), (-1,0), colors.white),
+        ("FONTSIZE",       (0,0), (-1,-1), 9),
+        ("ALIGN",          (1,0), (-1,-1), "CENTER"),
         ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, colors.HexColor("#f0f6ff")]),
-        ("GRID",       (0,0), (-1,-1), 0.5, colors.HexColor("#e2e8f0")),
-        ("ROWHEIGHT",  (0,0), (-1,-1), 22),
+        ("GRID",           (0,0), (-1,-1), 0.5, colors.HexColor("#e2e8f0")),
+        ("ROWHEIGHT",      (0,0), (-1,-1), 22),
     ]))
     story.append(prof_table)
 
@@ -536,17 +524,16 @@ def get_pdf_mes(month: str):
         tipo_data.append([tipo, str(vals["count"]), _format_monto(vals["monto"])])
     tipo_table = Table(tipo_data, colWidths=[8*cm, 4*cm, 4.5*cm])
     tipo_table.setStyle(TableStyle([
-        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#0f172a")),
-        ("TEXTCOLOR",  (0,0), (-1,0), colors.white),
-        ("FONTSIZE",   (0,0), (-1,-1), 9),
-        ("ALIGN",      (1,0), (-1,-1), "CENTER"),
+        ("BACKGROUND",     (0,0), (-1,0), colors.HexColor("#0f172a")),
+        ("TEXTCOLOR",      (0,0), (-1,0), colors.white),
+        ("FONTSIZE",       (0,0), (-1,-1), 9),
+        ("ALIGN",          (1,0), (-1,-1), "CENTER"),
         ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, colors.HexColor("#f8fafc")]),
-        ("GRID",       (0,0), (-1,-1), 0.5, colors.HexColor("#e2e8f0")),
-        ("ROWHEIGHT",  (0,0), (-1,-1), 22),
+        ("GRID",           (0,0), (-1,-1), 0.5, colors.HexColor("#e2e8f0")),
+        ("ROWHEIGHT",      (0,0), (-1,-1), 22),
     ]))
     story.append(tipo_table)
 
-    
     # Por método
     story.append(Paragraph("Por método de pago", section_style))
     met_data = [["Método", "Cantidad", "Total"]]
@@ -554,43 +541,44 @@ def get_pdf_mes(month: str):
         met_data.append([met.capitalize(), str(vals["count"]), _format_monto(vals["monto"])])
     met_table = Table(met_data, colWidths=[8*cm, 4*cm, 4.5*cm])
     met_table.setStyle(TableStyle([
-        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#0f172a")),
-        ("TEXTCOLOR",  (0,0), (-1,0), colors.white),
-        ("FONTSIZE",   (0,0), (-1,-1), 9),
-        ("ALIGN",      (1,0), (-1,-1), "CENTER"),
+        ("BACKGROUND",     (0,0), (-1,0), colors.HexColor("#0f172a")),
+        ("TEXTCOLOR",      (0,0), (-1,0), colors.white),
+        ("FONTSIZE",       (0,0), (-1,-1), 9),
+        ("ALIGN",          (1,0), (-1,-1), "CENTER"),
         ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, colors.HexColor("#f8fafc")]),
-        ("GRID",       (0,0), (-1,-1), 0.5, colors.HexColor("#e2e8f0")),
-        ("ROWHEIGHT",  (0,0), (-1,-1), 22),
+        ("GRID",           (0,0), (-1,-1), 0.5, colors.HexColor("#e2e8f0")),
+        ("ROWHEIGHT",      (0,0), (-1,-1), 22),
     ]))
     story.append(met_table)
 
-    # Lista completa de pagos
+    # Detalle pagos
     story.append(Paragraph("Detalle de pagos", section_style))
-    pago_rows = [["Fecha", "Hora", "RUT", "Profesional", "Tipo", "Método", "Monto"]]
+    det_data = [["Fecha", "Hora", "Profesional", "RUT", "Tipo", "Método", "Monto"]]
     for p in data["pagos"]:
-        pago_rows.append([
-            p["date"], p["time"], p["rut"], p["professional"],
-            p["tipo_atencion"], p["metodo_pago"].capitalize(),
-            _format_monto(p["monto"])
+        det_data.append([
+            p["date"], p["time"], p["professional"],
+            p["rut"], p["tipo_atencion"],
+            p["metodo_pago"].capitalize() if p["metodo_pago"] else "Gratuito",
+            _format_monto(p["monto"]),
         ])
-    pago_table = Table(pago_rows, colWidths=[2.2*cm, 1.5*cm, 2.8*cm, 3*cm, 3*cm, 2.5*cm, 2*cm])
-    pago_table.setStyle(TableStyle([
-        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#0f172a")),
-        ("TEXTCOLOR",  (0,0), (-1,0), colors.white),
-        ("FONTSIZE",   (0,0), (-1,-1), 7.5),
-        ("ALIGN",      (6,0), (6,-1), "RIGHT"),
+    det_table = Table(det_data, colWidths=[2.2*cm, 1.5*cm, 2.5*cm, 2.5*cm, 2.8*cm, 2.2*cm, 2.8*cm])
+    det_table.setStyle(TableStyle([
+        ("BACKGROUND",     (0,0), (-1,0), colors.HexColor("#0f172a")),
+        ("TEXTCOLOR",      (0,0), (-1,0), colors.white),
+        ("FONTSIZE",       (0,0), (-1,-1), 7),
+        ("ALIGN",          (6,0), (6,-1), "RIGHT"),
         ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, colors.HexColor("#f8fafc")]),
-        ("GRID",       (0,0), (-1,-1), 0.5, colors.HexColor("#e2e8f0")),
-        ("ROWHEIGHT",  (0,0), (-1,-1), 18),
+        ("GRID",           (0,0), (-1,-1), 0.3, colors.HexColor("#e2e8f0")),
+        ("ROWHEIGHT",      (0,0), (-1,-1), 18),
     ]))
-    story.append(pago_table)
+    story.append(det_table)
 
     doc.build(story)
     buf.seek(0)
 
-    filename = f"resumen_contable_{month}.pdf"
     return StreamingResponse(
         buf,
         media_type="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename={filename}"}
+        headers={"Content-Disposition": f"attachment; filename=caja_{month}.pdf"}
     )
+    
