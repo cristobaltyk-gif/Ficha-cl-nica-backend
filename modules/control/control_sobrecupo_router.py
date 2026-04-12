@@ -20,6 +20,7 @@ from auth.internal_auth import require_internal_auth
 from agenda.store import load_store, save_store
 from notifications.email_service import enviar_confirmacion_sobrecupo
 from modules.pagos.flow_client import crear_pago
+from modules.admin.valores_consulta_router import get_valor_consulta
 
 router = APIRouter(prefix="/api/sobrecupo", tags=["Sobre Cupo"])
 
@@ -28,9 +29,8 @@ PROFESSIONALS_PATH = Path("/data/professionals.json")
 LOCK               = Lock()
 BASE_PACIENTES     = Path("/data/pacientes")
 
-BACKEND_URL = os.getenv("BACKEND_URL", "https://services.icarticular.cl")
+BACKEND_URL  = os.getenv("BACKEND_URL",  "https://services.icarticular.cl")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "https://reservas.icarticular.cl")
-VALOR_CONSULTA = int(os.getenv("VALOR_CONSULTA", "50000"))
 
 
 # ============================================================
@@ -185,7 +185,7 @@ def crear_sobrecupo(
             id_pago = f"SC-{data.professional}-{data.date}-{data.time}-{token[:8]}"
             flow    = crear_pago(
                 id_pago          = id_pago,
-                amount           = VALOR_CONSULTA,
+                amount           = get_valor_consulta(data.professional),
                 subject          = f"Sobre cupo {nombre_profesional} {data.date} {data.time}",
                 email            = email,
                 url_confirmation = f"{BACKEND_URL}/api/sobrecupo/pago/confirmar",
@@ -445,4 +445,4 @@ def _html_page(titulo: str, mensaje: str, color: str, icono: str) -> str:
   </div>
 </body>
 </html>"""
-        
+            
