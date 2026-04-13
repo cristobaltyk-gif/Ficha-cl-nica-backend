@@ -48,6 +48,7 @@ from modules.fichas.prediagnostico_ia_router import router as prediag_ia_router
 from core.sedes_router import router as sedes_router
 from core.geo_router import router as geo_router
 from modules.control.control_sobrecupo_router import router as sobrecupo_router
+from modules.caja.caja_config_router import router as caja_config_router
 
 # ==========================
 # APP CORE
@@ -105,6 +106,7 @@ app.include_router(prediag_ia_router)
 app.include_router(sedes_router)
 app.include_router(geo_router)
 app.include_router(sobrecupo_router)
+app.include_router(caja_config_router)
 
 # ==========================
 # HEALTHCHECK
