@@ -9,7 +9,7 @@ from pathlib import Path
 import json
 import os
 
-CONFIG_PATH = Path(os.path.dirname(__file__)) / "caja_config.json"
+CONFIG_PATH = Path("/data/caja_config.json")
 
 
 def _load_config() -> dict:
@@ -50,3 +50,4 @@ def get_valor_tipo(professional_id: str, tipo: str) -> int:
 
     # Fallback global
     return config.get(tipo, 0)
+    
