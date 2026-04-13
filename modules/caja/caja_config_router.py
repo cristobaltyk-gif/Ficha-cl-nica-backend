@@ -20,7 +20,7 @@ from auth.internal_auth import require_internal_auth
 
 router = APIRouter(prefix="/api/caja/admin/config", tags=["Caja Config"])
 
-CONFIG_PATH = Path(__file__).parent / "caja_config.json"
+CONFIG_PATH = Path("/data/caja_config.json")
 LOCK        = Lock()
 
 
@@ -225,4 +225,4 @@ def delete_config_profesional(professional_id: str, user=Depends(require_interna
         _save(config)
 
     return {"ok": True, "professional_id": professional_id, "eliminado": True}
-  
+    
