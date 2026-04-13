@@ -346,8 +346,7 @@ async def confirmar_pago_flow(request: Request):
         caja_path.parent.mkdir(parents=True, exist_ok=True)
         with open(caja_path, "w", encoding="utf-8") as f:
             json.dump(caja, f, indent=2, ensure_ascii=False)
-
-        # Registrar en pagos
+        print(f"[sobrecupo-caja] ✅ registrado {date} {professional} {time} ${monto}")
         pagos_path = Path("/data/pagos") / f"{mes}.json"
         pagos      = {}
         if pagos_path.exists():
@@ -497,4 +496,4 @@ def _html_page(titulo: str, mensaje: str, color: str, icono: str) -> str:
   </div>
 </body>
 </html>"""
-        
+    
