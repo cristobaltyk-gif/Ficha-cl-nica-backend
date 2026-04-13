@@ -51,11 +51,9 @@ def _get_professional_name(professional_id: str) -> str:
 
 
 def _calcular_edad(fecha_nacimiento: str) -> int | None:
-    """Calcula edad desde fecha_nacimiento (YYYY-MM-DD o DD MM YYYY)."""
     if not fecha_nacimiento:
         return None
     try:
-        # Intentar formato YYYY-MM-DD
         partes = str(fecha_nacimiento).strip().replace("/", "-").split("-")
         if len(partes) == 3:
             if len(partes[0]) == 4:
@@ -77,7 +75,6 @@ def _enviar_confirmacion_reserva(
     time: str,
     professional: str
 ) -> None:
-    """Envía email de confirmación de reserva al paciente. No bloquea si falla."""
     try:
         from notifications.email_service import enviar_confirmacion_reserva
         admin = _load_admin(rut)
@@ -88,11 +85,8 @@ def _enviar_confirmacion_reserva(
             return
         nombre = f"{admin.get('nombre', '')} {admin.get('apellido_paterno', '')}".strip()
         nombre_prof = _get_professional_name(professional)
-
-        # ← NUEVO: edad y sexo desde admin.json
         edad  = _calcular_edad(admin.get("fecha_nacimiento", ""))
         sexo  = admin.get("sexo", "")
-
         enviar_confirmacion_reserva(
             email_paciente=email,
             nombre_paciente=nombre,
@@ -100,8 +94,8 @@ def _enviar_confirmacion_reserva(
             fecha=date,
             hora=time,
             profesional_nombre=nombre_prof,
-            edad_paciente=edad,       # ← NUEVO
-            sexo_paciente=sexo,       # ← NUEVO
+            edad_paciente=edad,
+            sexo_paciente=sexo,
         )
     except Exception as e:
         print(f"⚠️ No se pudo enviar email de confirmación: {e}")
@@ -137,6 +131,12 @@ def _assert_free(date: str, time: str, professional: str) -> None:
         raise ValueError("El slot ya está ocupado.")
 
 
+def _assert_not_past_date(slot_date: str) -> None:
+    """Permite cancelar cualquier hora de hoy — bloquea solo fechas pasadas."""
+    if parse_yyyy_mm_dd(slot_date) < today_utc():
+        raise ValueError("No se puede cancelar un slot de una fecha pasada.")
+
+
 # =============================
 # Mutaciones
 # =============================
@@ -160,7 +160,6 @@ def create_slot(req: CreateSlotRequest) -> MutationResult:
         rut=rut,
     )
 
-    # Enviar email de confirmación de reserva
     _enviar_confirmacion_reserva(rut, req.date, req.time, professional)
 
     return MutationResult(
@@ -209,7 +208,8 @@ def confirm_slot(req: ConfirmSlotRequest) -> MutationResult:
 def cancel_slot(req: CancelSlotRequest) -> MutationResult:
     parse_yyyy_mm_dd(req.date)
     parse_hh_mm(req.time)
-    assert_future_slot(req.date, req.time)
+    # Permite cancelar cualquier hora de hoy — bloquea solo fechas pasadas
+    _assert_not_past_date(req.date)
 
     professional = req.professional
 
@@ -288,4 +288,4 @@ def reschedule(req: RescheduleRequest) -> MutationResult:
 def daily_cleanup() -> None:
     keep_from = today_utc().isoformat()
     store.cleanup_past(keep_from_date=keep_from)
-            
+        
