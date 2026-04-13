@@ -55,3 +55,8 @@ reportlab
 # Email (Resend)
 # =========================
 resend
+
+# =========================
+# Form parsing (Flow webhooks)
+# =========================
+python-multipart
