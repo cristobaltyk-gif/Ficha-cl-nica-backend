@@ -13,10 +13,15 @@ CONFIG_PATH = Path("/data/caja_config.json")
 
 
 def _load_config() -> dict:
-    if not CONFIG_PATH.exists():
-        return {}
-    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+    if CONFIG_PATH.exists():
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    # Fallback al repo si /data/ aún no tiene el archivo
+    fallback = Path(os.path.dirname(__file__)) / "caja_config.json"
+    if fallback.exists():
+        with open(fallback, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
 
 
 def get_tipos_profesional(professional_id: str) -> dict:
