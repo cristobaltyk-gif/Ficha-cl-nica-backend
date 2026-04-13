@@ -3,7 +3,7 @@ init_data.py — Inicialización de datos en disco persistente
 
 Se ejecuta al arrancar FastAPI.
 
-- Datos usuario (professionals, users, sedes): solo copiar si no existen
+- Datos usuario (professionals, users, sedes, caja_config): solo copiar si no existen
 - Configuración sistema (regiones.geo): SIEMPRE copiar desde repo
 """
 
@@ -17,6 +17,7 @@ REPO_PROFESSIONALS = Path("data/professionals.json")
 REPO_USERS         = Path("data/users.json")
 REPO_REGIONES      = Path("data/regiones.geo.json")
 REPO_SEDES         = Path("data/sedes.json")
+REPO_CAJA_CONFIG   = Path("modules/caja/caja_config.json")
 
 # ============================================================
 # DESTINOS (disco persistente Render)
@@ -25,6 +26,7 @@ DISK_PROFESSIONALS = Path("/data/professionals.json")
 DISK_USERS         = Path("/data/users.json")
 DISK_REGIONES      = Path("/data/regiones.geo.json")
 DISK_SEDES         = Path("/data/sedes.json")
+DISK_CAJA_CONFIG   = Path("/data/caja_config.json")
 
 
 def _init_file(repo: Path, disk: Path, fallback: str = "{}") -> None:
@@ -56,6 +58,7 @@ def init_disk_data() -> None:
     _init_file(REPO_PROFESSIONALS, DISK_PROFESSIONALS)
     _init_file(REPO_USERS,         DISK_USERS)
     _init_file(REPO_SEDES,         DISK_SEDES, fallback='{}')
+    _init_file(REPO_CAJA_CONFIG,   DISK_CAJA_CONFIG)
 
     # Configuración sistema — siempre desde repo
     _sync_file(REPO_REGIONES, DISK_REGIONES)
