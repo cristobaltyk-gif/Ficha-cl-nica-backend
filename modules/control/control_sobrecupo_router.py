@@ -11,7 +11,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 from threading import Lock
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import Optional
@@ -287,9 +287,8 @@ def confirmar_sobrecupo(token: str):
 # ============================================================
 
 @router.post("/pago/confirmar")
-async def confirmar_pago_flow(request):
-    from fastapi import Request
-    body = await request.form()
+async def confirmar_pago_flow(request: Request):
+    body       = await request.form()
     flow_token = body.get("token")
     if not flow_token:
         raise HTTPException(status_code=400, detail="Token Flow requerido")
@@ -297,7 +296,6 @@ async def confirmar_pago_flow(request):
     from modules.pagos.flow_client import obtener_estado_pago
     estado = obtener_estado_pago(flow_token)
 
-    # status 2 = pagado
     if estado.get("status") != 2:
         return {"ok": False, "status": estado.get("status")}
 
@@ -314,14 +312,65 @@ async def confirmar_pago_flow(request):
     if not all([token_sobrecupo, professional, date, time]):
         raise HTTPException(status_code=400, detail="Datos incompletos en optional")
 
+    # Buscar monto y rut desde el slot
+    store = load_store()
+    slot  = _get_slot(store, date, professional, time)
+    rut   = slot.get("rut", "")
+    monto = get_valor_tipo(professional, "sobrecupo")
+
     with LOCK:
         store = load_store()
         _set_slot_field(store, date, professional, time, {
             "sobrecupo_confirmado": True,
             "pago_confirmado":      True,
             "pago_confirmado_at":   datetime.now(timezone.utc).isoformat(),
+            "pagado":               True,
         })
         save_store(store)
+
+        mes = date[:7]
+
+        # Registrar en caja
+        caja_path = Path("/data/caja") / f"{mes}.json"
+        caja      = {}
+        if caja_path.exists():
+            with open(caja_path, "r", encoding="utf-8") as f:
+                caja = json.load(f)
+        caja.setdefault(date, {}).setdefault(professional, {})[time] = {
+            "arrival_status": "paid",
+            "pagado":         True,
+            "tipo_atencion":  "sobrecupo",
+            "monto":          monto,
+            "es_gratuito":    False,
+        }
+        caja_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(caja_path, "w", encoding="utf-8") as f:
+            json.dump(caja, f, indent=2, ensure_ascii=False)
+
+        # Registrar en pagos
+        pagos_path = Path("/data/pagos") / f"{mes}.json"
+        pagos      = {}
+        if pagos_path.exists():
+            with open(pagos_path, "r", encoding="utf-8") as f:
+                pagos = json.load(f)
+        pagos.setdefault(date, {}).setdefault(professional, {})[time] = {
+            "rut":              rut,
+            "tipo_atencion":    "sobrecupo",
+            "monto":            monto,
+            "es_gratuito":      False,
+            "metodo_pago":      "flow",
+            "numero_operacion": str(estado.get("flowOrder", "")),
+            "banco_origen":     None,
+            "pagado_at":        datetime.now().isoformat(timespec="seconds"),
+            "pagado_por":       "flow_online",
+            "anulado":          False,
+            "anulacion_motivo": None,
+            "anulacion_at":     None,
+            "anulado_por":      None,
+        }
+        pagos_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(pagos_path, "w", encoding="utf-8") as f:
+            json.dump(pagos, f, indent=2, ensure_ascii=False)
 
     return {"ok": True}
 
@@ -448,3 +497,4 @@ def _html_page(titulo: str, mensaje: str, color: str, icono: str) -> str:
   </div>
 </body>
 </html>"""
+        
