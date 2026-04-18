@@ -161,3 +161,79 @@ def enviar_confirmacion_pago(
         print(f"❌ ERROR EMAIL pago: {e}")
         return False
     
+# ======================================================
+# CONFIRMACIÓN DE ASISTENCIA CON LINK PAGO OPCIONAL
+# ======================================================
+
+def enviar_asistencia_confirmada(
+    *,
+    email_paciente: str,
+    nombre_paciente: str,
+    fecha: str,
+    hora: str,
+    profesional_nombre: str,
+    monto: int,
+    es_gratuito: bool,
+    payment_url: str | None = None,
+) -> bool:
+    _init()
+
+    fecha_text = _formato_fecha_legible(fecha)
+    monto_str  = f"${monto:,}".replace(",", ".")
+
+    if es_gratuito:
+        pago_html = "<p style='color:#16a34a;font-weight:bold;margin-top:12px;'>Esta atención no tiene costo para usted.</p>"
+    elif payment_url:
+        pago_html = f"""
+        <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;
+                    padding:16px 18px;margin:20px 0;">
+            <p style="margin:0 0 6px 0;font-size:14px;color:#78350f;">
+                💳 Valor de la consulta: <strong>{monto_str}</strong>
+            </p>
+            <p style="margin:0 0 12px 0;font-size:13px;color:#92400e;">
+                Si desea puede pagar en línea ahora con tarjeta o transferencia:
+            </p>
+            <a href="{payment_url}" style="display:inline-block;background:#d97706;
+                color:white;padding:11px 24px;border-radius:8px;
+                text-decoration:none;font-weight:bold;font-size:14px;">
+                Pagar en línea →
+            </a>
+            <p style="margin:10px 0 0 0;font-size:11px;color:#92400e;">
+                El pago es opcional. También puede cancelar en el centro el día de su consulta.
+            </p>
+        </div>
+        """
+    else:
+        pago_html = f"<p style='font-size:13px;color:#64748b;margin-top:12px;'>Valor consulta: <strong>{monto_str}</strong>. Puede cancelar en el centro.</p>"
+
+    html = f"""
+    <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:24px;background:#fff;">
+        <img src="{LOGO_URL}" alt="ICA" style="height:60px;margin-bottom:24px;"/>
+        <h2 style="color:#166534;">✓ Asistencia confirmada</h2>
+        <p>Estimado/a <strong>{nombre_paciente}</strong>,</p>
+        <p>Su asistencia ha sido registrada exitosamente:</p>
+        <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:16px;margin:20px 0;">
+            <p style="margin:4px 0;"><strong>Fecha:</strong> {fecha_text}</p>
+            <p style="margin:4px 0;"><strong>Hora:</strong> {hora}</p>
+            <p style="margin:4px 0;"><strong>Profesional:</strong> {profesional_nombre}</p>
+        </div>
+        {pago_html}
+        <p style="margin-top:16px;">Le esperamos 10 minutos antes de su hora.</p>
+        <p style="color:#64748b;font-size:12px;margin-top:24px;">
+            Si no puede asistir, contáctenos a contacto@icarticular.cl<br/>
+            Instituto de Cirugía Articular — Curicó, Chile
+        </p>
+    </div>
+    """
+
+    try:
+        resend.Emails.send({
+            "from":    FROM_EMAIL,
+            "to":      [email_paciente],
+            "subject": f"ICA — Asistencia confirmada · {fecha_text} {hora}",
+            "html":    html
+        })
+        return True
+    except Exception as e:
+        print(f"❌ ERROR EMAIL asistencia confirmada: {e}")
+        return False
