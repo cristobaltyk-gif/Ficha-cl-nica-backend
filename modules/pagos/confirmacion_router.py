@@ -59,6 +59,15 @@ def _set_slot_fields(date: str, professional: str, time: str, updates: dict) -> 
     _save_json(AGENDA_PATH, store)
 
 
+def _get_nombre_paciente(rut: str) -> str:
+    admin_path = Path("/data/pacientes") / rut / "admin.json"
+    if admin_path.exists():
+        with open(admin_path) as f:
+            adm = json.load(f)
+        return f"{adm.get('nombre', '')} {adm.get('apellido_paterno', '')}".strip()
+    return rut
+
+
 def _html(titulo: str, contenido: str, color: str, icono: str) -> str:
     return f"""<!DOCTYPE html>
 <html lang="es">
@@ -105,7 +114,6 @@ def confirmar_asistencia(token: str):
                 "Enlace inválido", "Este enlace ya fue usado o ha expirado.", "#ef4444", "❌"
             ), status_code=404)
 
-        # Confirmar asistencia → slot confirmed
         _set_slot_fields(ref["date"], ref["professional"], ref["time"], {
             "status":                "confirmed",
             "asistencia_confirmada": True,
@@ -121,7 +129,7 @@ def confirmar_asistencia(token: str):
     if monto > 0:
         try:
             from modules.pagos.flow_client import crear_pago
-            pago_id  = f"ICA-{ref['date']}-{ref['professional']}-{ref['time'].replace(':','')}"
+            pago_id   = f"ICA-{ref['date']}-{ref['professional']}-{ref['time'].replace(':','')}"
             resultado = crear_pago(
                 id_pago=pago_id,
                 amount=monto,
@@ -130,10 +138,10 @@ def confirmar_asistencia(token: str):
                 url_confirmation=f"{BACKEND_URL}/api/flow/webhook",
                 url_return=f"{BACKEND_URL}/api/flow/retorno",
                 optional_data={
-                    "date":         ref["date"],
-                    "time":         ref["time"],
-                    "professional": ref["professional"],
-                    "rut":          ref.get("rut", ""),
+                    "date":          ref["date"],
+                    "time":          ref["time"],
+                    "professional":  ref["professional"],
+                    "rut":           ref.get("rut", ""),
                     "tipo_atencion": ref.get("tipo_atencion", "particular"),
                 }
             )
@@ -141,19 +149,38 @@ def confirmar_asistencia(token: str):
 
             pagos_flow = _load_json(PAGOS_FLOW_PATH)
             pagos_flow[resultado["token"]] = {
-                "date":         ref["date"],
-                "time":         ref["time"],
-                "professional": ref["professional"],
-                "rut":          ref.get("rut", ""),
-                "email":        ref.get("email", ""),
-                "monto":        monto,
+                "date":          ref["date"],
+                "time":          ref["time"],
+                "professional":  ref["professional"],
+                "rut":           ref.get("rut", ""),
+                "email":         ref.get("email", ""),
+                "monto":         monto,
                 "tipo_atencion": ref.get("tipo_atencion", "particular"),
-                "created_at":   datetime.now(timezone.utc).isoformat()
+                "created_at":    datetime.now(timezone.utc).isoformat()
             }
             _save_json(PAGOS_FLOW_PATH, pagos_flow)
 
         except Exception as e:
             print(f"⚠️ Error creando pago Flow: {e}")
+
+    # Email post-confirmación con link de pago opcional
+    email_pac = ref.get("email", "")
+    if email_pac:
+        try:
+            from notifications.email_pagos import enviar_asistencia_confirmada
+            nombre_pac = _get_nombre_paciente(ref.get("rut", ""))
+            enviar_asistencia_confirmada(
+                email_paciente=email_pac,
+                nombre_paciente=nombre_pac,
+                fecha=ref["date"],
+                hora=ref["time"],
+                profesional_nombre=ref["professional"],
+                monto=monto,
+                es_gratuito=(monto == 0),
+                payment_url=link_pago,
+            )
+        except Exception as e:
+            print(f"⚠️ Error enviando email confirmación: {e}")
 
     if link_pago:
         contenido = f"""
@@ -236,20 +263,12 @@ async def flow_webhook(request: Request):
             }
             _save_json(pagos_path, pagos)
 
-        # Email de confirmación de pago
+        # Email confirmación de pago exitoso
         email = ref.get("email", "")
         if email:
             try:
                 from notifications.email_pagos import enviar_confirmacion_pago
-                from modules.pagos.flow_client import obtener_estado_pago as get_estado
-                rut = ref.get("rut", "")
-                admin_path = Path("/data/pacientes") / rut / "admin.json"
-                nombre = rut
-                if admin_path.exists():
-                    with open(admin_path) as f:
-                        admin = json.load(f)
-                    nombre = f"{admin.get('nombre','')} {admin.get('apellido_paterno','')}".strip()
-                from modules.pagos.flow_client import _get_professional_name_safe
+                nombre = _get_nombre_paciente(ref.get("rut", ""))
                 enviar_confirmacion_pago(
                     email_paciente=email,
                     nombre_paciente=nombre,
@@ -294,4 +313,4 @@ async def flow_retorno(request: Request):
         "Su pago está siendo procesado. También puede pagar al llegar al centro.",
         "#1e40af", "⏳"
     ))
-  
+    
