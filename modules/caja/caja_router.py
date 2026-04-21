@@ -1,4 +1,11 @@
-from fastapi import APIRouter, HTTPException, Query
+# ============================================================
+# caja_router.py  —  PARTE 1 de 2
+# Imports, constantes, helpers, schemas
+# Endpoints de escritura: /config, /day, /slot (PATCH/DELETE),
+#                         /pago, /anular
+# ============================================================
+
+from fastapi import APIRouter, HTTPException, Query, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional, List
@@ -10,14 +17,21 @@ from datetime import datetime, date as date_type
 from collections import defaultdict
 
 from modules.caja.caja_config_helper import get_tipos_profesional, get_valor_tipo
+from auth.auth_middleware import require_internal_auth
 
 router = APIRouter(prefix="/api/caja", tags=["Caja"])
 
+# ----------------------------------------------------------
+# Rutas de datos (disco persistente de Render → /data)
+# ----------------------------------------------------------
 CAJA_DIR    = Path("/data/caja")
 PAGOS_DIR   = Path("/data/pagos")
 AGENDA_PATH = Path("/data/agenda_future.json")
 CONFIG_PATH = Path(os.path.dirname(__file__)) / "caja_config.json"
 
+# ----------------------------------------------------------
+# Constantes de dominio
+# ----------------------------------------------------------
 TIPOS_VALIDOS = {
     "particular", "control_costo", "control_gratuito",
     "sobrecupo", "kinesiologia", "paquete_10"
@@ -35,8 +49,27 @@ TIPOS_LABELS = {
     "paquete_10":       "Paquete 10 sesiones",
 }
 
+# ----------------------------------------------------------
+# Control de acceso por rol
+# admin y secretaria ven todos los profesionales.
+# medico y kinesiologia solo ven el suyo propio.
+# ----------------------------------------------------------
+ROLES_ADMIN = {"admin", "secretaria"}
+
+def _can_see_all(auth: dict) -> bool:
+    return auth["role"]["name"] in ROLES_ADMIN
+
+def _resolve_professional(auth: dict, requested: Optional[str] = None) -> Optional[str]:
+    """
+    Si es admin/secretaria → devuelve `requested` tal cual (None = todos).
+    Si es médico/kine      → fuerza auth['professional'], ignorando `requested`.
+    """
+    if _can_see_all(auth):
+        return requested
+    return auth["professional"]
+
 # =========================
-# HELPERS
+# HELPERS — I/O de disco
 # =========================
 
 def _month_key(date: str) -> str:
@@ -160,10 +193,17 @@ def get_config(professional: Optional[str] = Query(None)):
 
 # =========================
 # GET — panel del día
+# Filtrado por rol: médico/kine solo ven su propio profesional
 # =========================
 
 @router.get("/day")
-def get_caja_day(date: str, professional: str):
+def get_caja_day(
+    date: str,
+    professional: str,
+    auth: dict = Depends(require_internal_auth),
+):
+    professional = _resolve_professional(auth, professional)
+
     agenda_slots = _load_agenda_day(date, professional)
     caja         = _load_caja_day(date, professional)
 
@@ -289,13 +329,46 @@ def anular_pago(data: AnulacionCreate):
 
     _delete_caja_slot(data.date, data.professional, data.time)
     return {"ok": True}
- # =========================
-# GET — resumen día (un profesional)
+    # ============================================================
+# caja_router.py  —  PARTE 2 de 2
+# Endpoints de lectura con filtro por rol:
+#   /summary, /resumen-dia, /resumen-mes, /pdf-mes
+#
+# PEGAR A CONTINUACIÓN DE LA PARTE 1 (mismo archivo)
+# ============================================================
+
+# =========================
+# HELPER INTERNO — día sin auth
+# Usado por _get_caja_summary para no llamar al endpoint con Depends
 # =========================
 
-@router.get("/summary")
-def get_caja_summary(date: str, professional: str):
-    day   = get_caja_day(date, professional)
+def _get_caja_day_raw(date: str, professional: str) -> dict:
+    """Versión sin auth de GET /day. Solo para llamadas internas."""
+    agenda_slots = _load_agenda_day(date, professional)
+    caja         = _load_caja_day(date, professional)
+    result = []
+    for time, slot in agenda_slots.items():
+        if slot.get("status") not in ("reserved", "confirmed"):
+            continue
+        cs    = caja.get(time, {})
+        tipo  = cs.get("tipo_atencion", "particular")
+        monto = get_valor_tipo(professional, tipo)
+        result.append({
+            "time":           time,
+            "rut":            slot.get("rut", ""),
+            "arrival_status": cs.get("arrival_status"),
+            "tipo_atencion":  tipo,
+            "monto":          monto,
+            "pagado":         cs.get("pagado", False),
+            "es_gratuito":    tipo in TIPOS_GRATUITOS,
+        })
+    result.sort(key=lambda x: x["time"])
+    return {"date": date, "professional": professional, "slots": result}
+
+
+def _get_caja_summary(date: str, professional: str) -> dict:
+    """Lógica pura de summary sin auth. Llamada internamente por resumen-dia."""
+    day   = _get_caja_day_raw(date, professional)
     slots = day["slots"]
     pagos = _load_pagos_day(date, professional)
 
@@ -333,51 +406,12 @@ def get_caja_summary(date: str, professional: str):
         "por_tipo": por_tipo, "por_metodo": por_metodo, "pacientes": pacientes,
     }
 
-# =========================
-# GET — resumen día (todos los profesionales)
-# =========================
 
-@router.get("/resumen-dia")
-def get_resumen_dia(date: str, professional: Optional[str] = Query(None)):
-    professionals     = [professional] if professional else _load_agenda_professionals(date)
-    resumen_por_prof  = []
-    total_global      = 0
-    por_tipo_global   = {}
-    por_metodo_global = {}
-    pacientes_global  = []
-
-    for prof in professionals:
-        s = get_caja_summary(date, prof)
-        resumen_por_prof.append({
-            "professional":    prof,
-            "total_pacientes": s["total_pacientes"],
-            "pagados":         s["pagados"],
-            "esperando":       s["esperando"],
-            "monto_total":     s["monto_total"],
-        })
-        total_global += s["monto_total"]
-        for t, v in s["por_tipo"].items():
-            por_tipo_global[t]   = por_tipo_global.get(t, 0) + v
-        for m, v in s["por_metodo"].items():
-            por_metodo_global[m] = por_metodo_global.get(m, 0) + v
-        for p in s["pacientes"]:
-            pacientes_global.append({**p, "professional": prof})
-
-    pacientes_global.sort(key=lambda x: x["time"])
-    por_tipo_labeled = {TIPOS_LABELS.get(t, t): v for t, v in por_tipo_global.items()}
-
-    return {
-        "date": date, "monto_total": total_global,
-        "por_tipo": por_tipo_labeled, "por_metodo": por_metodo_global,
-        "por_profesional": resumen_por_prof, "pacientes": pacientes_global,
-    }
-
-# =========================
-# GET — resumen mensual (contable)
-# =========================
-
-@router.get("/resumen-mes")
-def get_resumen_mes(month: str):
+def _compute_resumen_mes(month: str, professional: Optional[str] = None) -> dict:
+    """
+    Lógica pura de resumen mensual sin auth.
+    professional=None → todos los profesionales (solo admin/secretaria llegan aquí con None).
+    """
     path  = _pagos_path_by_month(month)
     store = _load_json(path)
 
@@ -400,6 +434,10 @@ def get_resumen_mes(month: str):
 
     for date_key, profs in store.items():
         for prof, slots in profs.items():
+            # Filtrar por profesional si el rol lo requiere
+            if professional and prof != professional:
+                continue
+
             for time, pago in slots.items():
                 if pago.get("anulado"):
                     total_anulados += 1
@@ -448,11 +486,86 @@ def get_resumen_mes(month: str):
     }
 
 # =========================
+# GET — resumen día (un profesional)
+# =========================
+
+@router.get("/summary")
+def get_caja_summary(
+    date: str,
+    professional: str,
+    auth: dict = Depends(require_internal_auth),
+):
+    professional = _resolve_professional(auth, professional)
+    return _get_caja_summary(date, professional)
+
+# =========================
+# GET — resumen día (todos los profesionales)
+# =========================
+
+@router.get("/resumen-dia")
+def get_resumen_dia(
+    date: str,
+    professional: Optional[str] = Query(None),
+    auth: dict = Depends(require_internal_auth),
+):
+    professional  = _resolve_professional(auth, professional)
+    professionals = [professional] if professional else _load_agenda_professionals(date)
+
+    resumen_por_prof  = []
+    total_global      = 0
+    por_tipo_global   = {}
+    por_metodo_global = {}
+    pacientes_global  = []
+
+    for prof in professionals:
+        s = _get_caja_summary(date, prof)
+        resumen_por_prof.append({
+            "professional":    prof,
+            "total_pacientes": s["total_pacientes"],
+            "pagados":         s["pagados"],
+            "esperando":       s["esperando"],
+            "monto_total":     s["monto_total"],
+        })
+        total_global += s["monto_total"]
+        for t, v in s["por_tipo"].items():
+            por_tipo_global[t]   = por_tipo_global.get(t, 0) + v
+        for m, v in s["por_metodo"].items():
+            por_metodo_global[m] = por_metodo_global.get(m, 0) + v
+        for p in s["pacientes"]:
+            pacientes_global.append({**p, "professional": prof})
+
+    pacientes_global.sort(key=lambda x: x["time"])
+    por_tipo_labeled = {TIPOS_LABELS.get(t, t): v for t, v in por_tipo_global.items()}
+
+    return {
+        "date": date, "monto_total": total_global,
+        "por_tipo": por_tipo_labeled, "por_metodo": por_metodo_global,
+        "por_profesional": resumen_por_prof, "pacientes": pacientes_global,
+    }
+
+# =========================
+# GET — resumen mensual (contable)
+# =========================
+
+@router.get("/resumen-mes")
+def get_resumen_mes(
+    month: str,
+    auth: dict = Depends(require_internal_auth),
+):
+    professional = _resolve_professional(auth)
+    return _compute_resumen_mes(month, professional)
+
+# =========================
 # GET — exportar PDF mensual
+# Médico/kine → PDF solo con sus datos + nombre de archivo personalizado
+# Admin/secretaria → PDF con todos los profesionales
 # =========================
 
 @router.get("/pdf-mes")
-def get_pdf_mes(month: str):
+def get_pdf_mes(
+    month: str,
+    auth: dict = Depends(require_internal_auth),
+):
     try:
         from reportlab.lib.pagesizes import A4
         from reportlab.lib import colors
@@ -463,11 +576,13 @@ def get_pdf_mes(month: str):
     except ImportError:
         raise HTTPException(status_code=500, detail="reportlab no instalado")
 
-    data   = get_resumen_mes(month)
-    buf    = io.BytesIO()
-    doc    = SimpleDocTemplate(buf, pagesize=A4,
-                               leftMargin=2*cm, rightMargin=2*cm,
-                               topMargin=2*cm, bottomMargin=2*cm)
+    professional = _resolve_professional(auth)
+    data         = _compute_resumen_mes(month, professional)
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4,
+                            leftMargin=2*cm, rightMargin=2*cm,
+                            topMargin=2*cm, bottomMargin=2*cm)
     styles = getSampleStyleSheet()
     story  = []
 
@@ -475,8 +590,12 @@ def get_pdf_mes(month: str):
     sub_style     = ParagraphStyle("sub",     parent=styles["Normal"],   fontSize=10, spaceAfter=12, alignment=TA_CENTER, textColor=colors.grey)
     section_style = ParagraphStyle("section", parent=styles["Heading2"], fontSize=12, spaceBefore=16, spaceAfter=6)
 
+    subtitle = f"Resumen contable — {month}"
+    if professional:
+        subtitle += f" — {professional}"
+
     story.append(Paragraph("Instituto de Cirugía Articular", title_style))
-    story.append(Paragraph(f"Resumen contable — {month}", sub_style))
+    story.append(Paragraph(subtitle, sub_style))
     story.append(Spacer(1, 0.3*cm))
 
     # KPIs
@@ -500,24 +619,25 @@ def get_pdf_mes(month: str):
     story.append(kpi_table)
     story.append(Spacer(1, 0.5*cm))
 
-    # Por profesional
-    story.append(Paragraph("Por profesional", section_style))
-    prof_data = [["Profesional", "Pagos", "Total"]]
-    for prof, vals in data["por_profesional"].items():
-        prof_data.append([prof, str(vals["pagos"]), _format_monto(vals["monto"])])
-    prof_table = Table(prof_data, colWidths=[8*cm, 4*cm, 4.5*cm])
-    prof_table.setStyle(TableStyle([
-        ("BACKGROUND",     (0,0), (-1,0), colors.HexColor("#1e40af")),
-        ("TEXTCOLOR",      (0,0), (-1,0), colors.white),
-        ("FONTSIZE",       (0,0), (-1,-1), 9),
-        ("ALIGN",          (1,0), (-1,-1), "CENTER"),
-        ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, colors.HexColor("#f0f6ff")]),
-        ("GRID",           (0,0), (-1,-1), 0.5, colors.HexColor("#e2e8f0")),
-        ("ROWHEIGHT",      (0,0), (-1,-1), 22),
-    ]))
-    story.append(prof_table)
+    # Tabla por profesional: solo visible para admin/secretaria
+    if not professional:
+        story.append(Paragraph("Por profesional", section_style))
+        prof_data = [["Profesional", "Pagos", "Total"]]
+        for prof, vals in data["por_profesional"].items():
+            prof_data.append([prof, str(vals["pagos"]), _format_monto(vals["monto"])])
+        prof_table = Table(prof_data, colWidths=[8*cm, 4*cm, 4.5*cm])
+        prof_table.setStyle(TableStyle([
+            ("BACKGROUND",     (0,0), (-1,0), colors.HexColor("#1e40af")),
+            ("TEXTCOLOR",      (0,0), (-1,0), colors.white),
+            ("FONTSIZE",       (0,0), (-1,-1), 9),
+            ("ALIGN",          (1,0), (-1,-1), "CENTER"),
+            ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, colors.HexColor("#f0f6ff")]),
+            ("GRID",           (0,0), (-1,-1), 0.5, colors.HexColor("#e2e8f0")),
+            ("ROWHEIGHT",      (0,0), (-1,-1), 22),
+        ]))
+        story.append(prof_table)
 
-    # Por tipo
+    # Por tipo de atención
     story.append(Paragraph("Por tipo de atención", section_style))
     tipo_data = [["Tipo", "Cantidad", "Total"]]
     for tipo, vals in data["por_tipo"].items():
@@ -534,7 +654,7 @@ def get_pdf_mes(month: str):
     ]))
     story.append(tipo_table)
 
-    # Por método
+    # Por método de pago
     story.append(Paragraph("Por método de pago", section_style))
     met_data = [["Método", "Cantidad", "Total"]]
     for met, vals in data["por_metodo"].items():
@@ -551,7 +671,7 @@ def get_pdf_mes(month: str):
     ]))
     story.append(met_table)
 
-    # Detalle pagos
+    # Detalle de pagos
     story.append(Paragraph("Detalle de pagos", section_style))
     det_data = [["Fecha", "Hora", "Profesional", "RUT", "Tipo", "Método", "Monto"]]
     for p in data["pagos"]:
@@ -576,8 +696,10 @@ def get_pdf_mes(month: str):
     doc.build(story)
     buf.seek(0)
 
+    filename = f"caja_{month}_{professional}.pdf" if professional else f"caja_{month}.pdf"
     return StreamingResponse(
         buf,
         media_type="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename=caja_{month}.pdf"}
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
 )
+    
