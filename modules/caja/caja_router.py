@@ -17,7 +17,7 @@ from datetime import datetime, date as date_type
 from collections import defaultdict
 
 from modules.caja.caja_config_helper import get_tipos_profesional, get_valor_tipo
-from auth.auth_middleware import require_internal_auth
+from auth.internal_auth import require_internal_auth
 
 router = APIRouter(prefix="/api/caja", tags=["Caja"])
 
