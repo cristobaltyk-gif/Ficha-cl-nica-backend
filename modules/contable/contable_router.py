@@ -9,8 +9,9 @@ import json
 import io
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
+from auth.internal_auth import require_internal_auth
 
 router = APIRouter(prefix="/api/contable", tags=["Contable"])
 
@@ -89,8 +90,8 @@ def _resumen_mes(mes: str) -> dict:
                 "professional": p["professional"]
             })
 
-    gastos_total    = 0
-    gastos_detalle  = []
+    gastos_total     = 0
+    gastos_detalle   = []
     gastos_por_grupo = {}
 
     for grupo, items in gastos.items():
@@ -124,13 +125,14 @@ def _resumen_mes(mes: str) -> dict:
     }
 
 
+# FIX: agregado auth en ambos endpoints
 @router.get("/resumen/{mes}")
-def get_resumen(mes: str):
+def get_resumen(mes: str, auth: dict = Depends(require_internal_auth)):
     return _resumen_mes(mes)
 
 
 @router.get("/exportar/{mes}")
-def exportar_excel(mes: str):
+def exportar_excel(mes: str, auth: dict = Depends(require_internal_auth)):
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
@@ -139,15 +141,15 @@ def exportar_excel(mes: str):
     wb   = Workbook()
 
     # ── Estilos ──
-    NAVY    = "0D1B2A"
-    BLUE    = "1E40AF"
-    GREEN   = "166534"
-    RED     = "991B1B"
-    YELLOW  = "854D0E"
-    BG_GRAY = "F1F5F9"
-    BG_GREEN = "F0FDF4"
-    BG_RED   = "FEF2F2"
-    BG_BLUE  = "EFF6FF"
+    NAVY      = "0D1B2A"
+    BLUE      = "1E40AF"
+    GREEN     = "166534"
+    RED       = "991B1B"
+    YELLOW    = "854D0E"
+    BG_GRAY   = "F1F5F9"
+    BG_GREEN  = "F0FDF4"
+    BG_RED    = "FEF2F2"
+    BG_BLUE   = "EFF6FF"
     BG_YELLOW = "FEFCE8"
 
     def header_font(color=None):
@@ -166,9 +168,6 @@ def exportar_excel(mes: str):
     def center():
         return Alignment(horizontal="center", vertical="center")
 
-    def clp(val):
-        return f"$#,##0;($#,##0);-"
-
     # ======================================================
     # HOJA 1 — RESUMEN EJECUTIVO
     # ======================================================
@@ -176,7 +175,6 @@ def exportar_excel(mes: str):
     ws.title = "Resumen"
     ws.sheet_view.showGridLines = False
 
-    # Título
     ws.merge_cells("A1:F1")
     ws["A1"] = f"Instituto de Cirugía Articular — Resumen Contable {mes}"
     ws["A1"].font      = Font(name="Arial", bold=True, size=14, color=NAVY)
@@ -189,8 +187,6 @@ def exportar_excel(mes: str):
     ws["A2"].alignment = center()
     ws.row_dimensions[2].height = 18
 
-    # KPIs — fila 4
-    ws.row_dimensions[4].height = 14
     kpis = [
         ("Ingresos totales",  data["ingresos_total"],  BG_GREEN,  GREEN),
         ("Anulaciones",      -data["anulados_total"],   BG_RED,    RED),
@@ -198,33 +194,29 @@ def exportar_excel(mes: str):
         ("Utilidad neta",     data["utilidad_neta"],    BG_BLUE,   BLUE),
     ]
 
+    ws.row_dimensions[4].height = 14
     ws.row_dimensions[5].height = 20
     ws.row_dimensions[6].height = 36
     ws.row_dimensions[7].height = 20
 
-    cols = [1, 2, 3, 4]
     for i, (label, valor, bg, color) in enumerate(kpis):
         col = i + 1
-        # Label
-        ws.cell(row=5, column=col, value=label).font = Font(name="Arial", size=9, bold=True, color="64748B")
+        ws.cell(row=5, column=col, value=label).font      = Font(name="Arial", size=9, bold=True, color="64748B")
         ws.cell(row=5, column=col).alignment = Alignment(horizontal="center")
-        ws.cell(row=5, column=col).fill = fill(bg)
-        # Valor
+        ws.cell(row=5, column=col).fill      = fill(bg)
+        ws.cell(row=5, column=col).border    = border()
         cell = ws.cell(row=6, column=col, value=valor)
-        cell.font      = Font(name="Arial", size=16, bold=True, color=color)
-        cell.alignment = center()
-        cell.fill      = fill(bg)
+        cell.font          = Font(name="Arial", size=16, bold=True, color=color)
+        cell.alignment     = center()
+        cell.fill          = fill(bg)
         cell.number_format = "$#,##0;($#,##0);\"-\""
-        cell.border    = border()
-        ws.cell(row=5, column=col).border = border()
+        cell.border        = border()
 
-    # Gastos por grupo — fila 9
     ws["A9"] = "Gastos por grupo"
     ws["A9"].font = Font(name="Arial", bold=True, size=11, color=NAVY)
     ws.row_dimensions[9].height = 22
 
-    headers_grupo = ["Grupo", "Total ($)"]
-    for j, h in enumerate(headers_grupo):
+    for j, h in enumerate(["Grupo", "Total ($)"]):
         cell = ws.cell(row=10, column=j+1, value=h)
         cell.font      = header_font()
         cell.fill      = fill(NAVY)
@@ -233,14 +225,14 @@ def exportar_excel(mes: str):
 
     row = 11
     for grupo, total in data["gastos_por_grupo"].items():
-        ws.cell(row=row, column=1, value=grupo).font      = cell_font()
-        ws.cell(row=row, column=1).border    = border()
-        ws.cell(row=row, column=1).fill      = fill(BG_GRAY)
-        monto_cell = ws.cell(row=row, column=2, value=-total)
-        monto_cell.font          = cell_font(bold=True, color=RED)
-        monto_cell.number_format = "$#,##0;($#,##0);\"-\""
-        monto_cell.border        = border()
-        monto_cell.fill          = fill(BG_GRAY)
+        ws.cell(row=row, column=1, value=grupo).font   = cell_font()
+        ws.cell(row=row, column=1).border = border()
+        ws.cell(row=row, column=1).fill   = fill(BG_GRAY)
+        mc = ws.cell(row=row, column=2, value=-total)
+        mc.font          = cell_font(bold=True, color=RED)
+        mc.number_format = "$#,##0;($#,##0);\"-\""
+        mc.border        = border()
+        mc.fill          = fill(BG_GRAY)
         row += 1
 
     ws.column_dimensions["A"].width = 28
@@ -260,8 +252,7 @@ def exportar_excel(mes: str):
     ws2["A1"].alignment = center()
     ws2.row_dimensions[1].height = 28
 
-    headers_ing = ["Fecha", "Hora", "RUT", "Tipo atención", "Profesional", "Método", "Monto ($)"]
-    for j, h in enumerate(headers_ing):
+    for j, h in enumerate(["Fecha", "Hora", "RUT", "Tipo atención", "Profesional", "Método", "Monto ($)"]):
         cell = ws2.cell(row=2, column=j+1, value=h)
         cell.font      = header_font()
         cell.fill      = fill(BLUE)
@@ -272,9 +263,8 @@ def exportar_excel(mes: str):
     for i, ing in enumerate(data["ingresos"]):
         row = i + 3
         bg = "FFFFFF" if i % 2 == 0 else BG_GRAY
-        vals = [ing["fecha"], ing["time"], ing["rut"], ing["tipo"],
-                ing["professional"], ing["metodo"], ing["monto"]]
-        for j, v in enumerate(vals):
+        for j, v in enumerate([ing["fecha"], ing["time"], ing["rut"], ing["tipo"],
+                                ing["professional"], ing["metodo"], ing["monto"]]):
             c = ws2.cell(row=row, column=j+1, value=v)
             c.font   = cell_font()
             c.fill   = fill(bg)
@@ -283,10 +273,9 @@ def exportar_excel(mes: str):
                 c.number_format = "$#,##0;($#,##0);\"-\""
                 c.font = cell_font(bold=True, color=GREEN)
 
-    # Total
     total_row = len(data["ingresos"]) + 3
-    ws2.cell(row=total_row, column=6, value="TOTAL").font = header_font(NAVY)
-    ws2.cell(row=total_row, column=6).fill  = fill(BG_GREEN)
+    ws2.cell(row=total_row, column=6, value="TOTAL").font   = header_font(NAVY)
+    ws2.cell(row=total_row, column=6).fill   = fill(BG_GREEN)
     ws2.cell(row=total_row, column=6).border = border()
     tc = ws2.cell(row=total_row, column=7, value=data["ingresos_total"])
     tc.font          = Font(name="Arial", bold=True, size=11, color=GREEN)
@@ -309,8 +298,7 @@ def exportar_excel(mes: str):
     ws3["A1"].alignment = center()
     ws3.row_dimensions[1].height = 28
 
-    headers_anu = ["Fecha", "Hora", "RUT", "Tipo atención", "Profesional", "Motivo", "Monto ($)"]
-    for j, h in enumerate(headers_anu):
+    for j, h in enumerate(["Fecha", "Hora", "RUT", "Tipo atención", "Profesional", "Motivo", "Monto ($)"]):
         cell = ws3.cell(row=2, column=j+1, value=h)
         cell.font      = header_font()
         cell.fill      = fill("7F1D1D")
@@ -320,9 +308,8 @@ def exportar_excel(mes: str):
     for i, anu in enumerate(data["anulados"]):
         row = i + 3
         bg = "FFFFFF" if i % 2 == 0 else BG_RED
-        vals = [anu["fecha"], anu["time"], anu["rut"], anu["tipo"],
-                anu["professional"], anu["motivo"], anu["monto"]]
-        for j, v in enumerate(vals):
+        for j, v in enumerate([anu["fecha"], anu["time"], anu["rut"], anu["tipo"],
+                                anu["professional"], anu["motivo"], anu["monto"]]):
             c = ws3.cell(row=row, column=j+1, value=v)
             c.font   = cell_font()
             c.fill   = fill(bg)
@@ -332,8 +319,8 @@ def exportar_excel(mes: str):
                 c.font = cell_font(bold=True, color=RED)
 
     total_row3 = len(data["anulados"]) + 3
-    ws3.cell(row=total_row3, column=6, value="TOTAL").font = header_font(NAVY)
-    ws3.cell(row=total_row3, column=6).fill  = fill(BG_RED)
+    ws3.cell(row=total_row3, column=6, value="TOTAL").font   = header_font(NAVY)
+    ws3.cell(row=total_row3, column=6).fill   = fill(BG_RED)
     ws3.cell(row=total_row3, column=6).border = border()
     tc3 = ws3.cell(row=total_row3, column=7, value=-data["anulados_total"])
     tc3.font          = Font(name="Arial", bold=True, size=11, color=RED)
@@ -356,8 +343,7 @@ def exportar_excel(mes: str):
     ws4["A1"].alignment = center()
     ws4.row_dimensions[1].height = 28
 
-    headers_gas = ["Grupo", "Categoría", "Descripción", "Fecha ingreso", "Monto ($)"]
-    for j, h in enumerate(headers_gas):
+    for j, h in enumerate(["Grupo", "Categoría", "Descripción", "Fecha ingreso", "Monto ($)"]):
         cell = ws4.cell(row=2, column=j+1, value=h)
         cell.font      = header_font()
         cell.fill      = fill(YELLOW)
@@ -367,9 +353,8 @@ def exportar_excel(mes: str):
     for i, gas in enumerate(data["gastos"]):
         row = i + 3
         bg = "FFFFFF" if i % 2 == 0 else BG_YELLOW
-        vals = [gas["grupo"], gas["categoria"], gas["descripcion"],
-                gas["created_at"][:10] if gas["created_at"] else "", gas["monto"]]
-        for j, v in enumerate(vals):
+        for j, v in enumerate([gas["grupo"], gas["categoria"], gas["descripcion"],
+                                gas["created_at"][:10] if gas["created_at"] else "", gas["monto"]]):
             c = ws4.cell(row=row, column=j+1, value=v)
             c.font   = cell_font()
             c.fill   = fill(bg)
@@ -379,8 +364,8 @@ def exportar_excel(mes: str):
                 c.font = cell_font(bold=True, color=YELLOW)
 
     total_row4 = len(data["gastos"]) + 3
-    ws4.cell(row=total_row4, column=4, value="TOTAL").font = header_font(NAVY)
-    ws4.cell(row=total_row4, column=4).fill  = fill(BG_YELLOW)
+    ws4.cell(row=total_row4, column=4, value="TOTAL").font   = header_font(NAVY)
+    ws4.cell(row=total_row4, column=4).fill   = fill(BG_YELLOW)
     ws4.cell(row=total_row4, column=4).border = border()
     tc4 = ws4.cell(row=total_row4, column=5, value=-data["gastos_total"])
     tc4.font          = Font(name="Arial", bold=True, size=11, color=YELLOW)
@@ -403,4 +388,3 @@ def exportar_excel(mes: str):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename=contable_{mes}.xlsx"}
     )
-      
