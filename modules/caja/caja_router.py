@@ -229,43 +229,51 @@ def get_caja_day(
 
 # =========================
 # PATCH — actualizar slot
+# FIX: agregado auth para normalizar professional con _resolve_professional
 # =========================
 
 @router.patch("/slot")
-def update_caja_slot(data: CajaUpdate):
+def update_caja_slot(data: CajaUpdate, auth: dict = Depends(require_internal_auth)):
     if data.arrival_status and data.arrival_status not in ESTADOS_VALIDOS:
         raise HTTPException(status_code=400, detail="arrival_status inválido")
     if data.tipo_atencion and data.tipo_atencion not in TIPOS_VALIDOS:
         raise HTTPException(status_code=400, detail="tipo_atencion inválido")
 
-    cs = _load_caja_slot(data.date, data.professional, data.time)
+    professional = _resolve_professional(auth, data.professional)
+
+    cs = _load_caja_slot(data.date, professional, data.time)
     if data.arrival_status is not None:
         cs["arrival_status"] = data.arrival_status
     if data.tipo_atencion is not None:
         cs["tipo_atencion"] = data.tipo_atencion
-        cs["monto"]         = get_valor_tipo(data.professional, data.tipo_atencion)
+        cs["monto"]         = get_valor_tipo(professional, data.tipo_atencion)
         cs["es_gratuito"]   = data.tipo_atencion in TIPOS_GRATUITOS
     if data.pagado is not None:
         cs["pagado"] = data.pagado
 
-    _save_caja_slot(data.date, data.professional, data.time, cs)
+    _save_caja_slot(data.date, professional, data.time, cs)
     return {"ok": True, "time": data.time}
 
 # =========================
 # DELETE — limpiar slot
+# FIX: agregado auth para normalizar professional con _resolve_professional
 # =========================
 
 @router.delete("/slot")
-def delete_caja_slot(data: CajaSlotDelete):
-    _delete_caja_slot(data.date, data.professional, data.time)
+def delete_caja_slot(data: CajaSlotDelete, auth: dict = Depends(require_internal_auth)):
+    professional = _resolve_professional(auth, data.professional)
+    _delete_caja_slot(data.date, professional, data.time)
     return {"ok": True, "time": data.time}
 
 # =========================
 # POST — registrar pago
+# FIX: agregado auth + _resolve_professional para usar siempre el id canónico
 # =========================
 
 @router.post("/pago")
-def registrar_pago(data: PagoCreate):
+def registrar_pago(data: PagoCreate, auth: dict = Depends(require_internal_auth)):
+    professional = _resolve_professional(auth, data.professional)
+
     if data.tipo_atencion not in TIPOS_VALIDOS:
         raise HTTPException(status_code=400, detail="tipo_atencion inválido")
 
@@ -277,9 +285,9 @@ def registrar_pago(data: PagoCreate):
         if data.metodo_pago in ("transferencia", "tarjeta") and not data.numero_operacion:
             raise HTTPException(status_code=400, detail="numero_operacion requerido")
 
-    monto = get_valor_tipo(data.professional, data.tipo_atencion)
+    monto = get_valor_tipo(professional, data.tipo_atencion)
 
-    _save_pago(data.date, data.professional, data.time, {
+    _save_pago(data.date, professional, data.time, {
         "rut":              data.rut,
         "tipo_atencion":    data.tipo_atencion,
         "monto":            monto,
@@ -295,22 +303,25 @@ def registrar_pago(data: PagoCreate):
         "anulado_por":      None,
     })
 
-    cs = _load_caja_slot(data.date, data.professional, data.time)
+    cs = _load_caja_slot(data.date, professional, data.time)
     cs["arrival_status"] = "paid"
     cs["pagado"]         = True
     cs["tipo_atencion"]  = data.tipo_atencion
     cs["monto"]          = monto
-    _save_caja_slot(data.date, data.professional, data.time, cs)
+    _save_caja_slot(data.date, professional, data.time, cs)
 
     return {"ok": True, "monto": monto, "es_gratuito": es_gratuito}
 
 # =========================
 # POST — anular pago
+# FIX: agregado auth + _resolve_professional para usar siempre el id canónico
 # =========================
 
 @router.post("/anular")
-def anular_pago(data: AnulacionCreate):
-    pagos = _load_pagos_day(data.date, data.professional)
+def anular_pago(data: AnulacionCreate, auth: dict = Depends(require_internal_auth)):
+    professional = _resolve_professional(auth, data.professional)
+
+    pagos = _load_pagos_day(data.date, professional)
 
     if data.time not in pagos:
         raise HTTPException(status_code=404, detail="Pago no encontrado")
@@ -324,12 +335,14 @@ def anular_pago(data: AnulacionCreate):
 
     path  = _pagos_path(data.date)
     store = _load_json(path)
-    store.setdefault(data.date, {}).setdefault(data.professional, {})[data.time] = pagos[data.time]
+    store.setdefault(data.date, {}).setdefault(professional, {})[data.time] = pagos[data.time]
     _save_json(path, store)
 
-    _delete_caja_slot(data.date, data.professional, data.time)
+    _delete_caja_slot(data.date, professional, data.time)
     return {"ok": True}
-    # ============================================================
+
+
+# ============================================================
 # caja_router.py  —  PARTE 2 de 2
 # Endpoints de lectura con filtro por rol:
 #   /summary, /resumen-dia, /resumen-mes, /pdf-mes
@@ -701,5 +714,4 @@ def get_pdf_mes(
         buf,
         media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename={filename}"}
-)
-    
+    )
