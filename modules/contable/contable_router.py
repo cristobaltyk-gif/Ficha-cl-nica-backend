@@ -12,6 +12,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from auth.internal_auth import require_internal_auth
+from modules.caja.comisiones_store import calcular as calcular_comision
 
 router = APIRouter(prefix="/api/contable", tags=["Contable"])
 
@@ -59,13 +60,17 @@ def _resumen_mes(mes: str) -> dict:
     pagos  = _load_pagos_mes(mes)
     gastos = _load_gastos().get(mes, {})
 
-    ingresos_total   = 0
-    anulados_total   = 0
-    ingresos_detalle = []
-    anulados_detalle = []
+    ingresos_total        = 0
+    anulados_total        = 0
+    pago_profesionales    = 0  # neto automático desde caja
+    ingresos_detalle      = []
+    anulados_detalle      = []
+    profesionales_detalle = {}  # agrupado por profesional
 
     for p in pagos:
         monto = p.get("monto", 0)
+        prof  = p["professional"]
+
         if p.get("anulado"):
             anulados_total += monto
             anulados_detalle.append({
@@ -75,21 +80,35 @@ def _resumen_mes(mes: str) -> dict:
                 "tipo":         TIPOS_LABELS.get(p.get("tipo_atencion", ""), p.get("tipo_atencion", "")),
                 "monto":        -monto,
                 "motivo":       p.get("anulacion_motivo", ""),
-                "professional": p["professional"]
+                "professional": prof,
             })
         else:
-            ingresos_total += monto
+            comision = calcular_comision(prof, monto)
+            ingresos_total     += monto
+            pago_profesionales += comision["neto"]
+
             ingresos_detalle.append({
                 "fecha":        p["fecha"],
                 "time":         p["time"],
                 "rut":          p.get("rut", ""),
                 "tipo":         TIPOS_LABELS.get(p.get("tipo_atencion", ""), p.get("tipo_atencion", "")),
                 "monto":        monto,
+                "retencion":    comision["retencion"],
+                "neto":         comision["neto"],
+                "porcentaje":   comision["porcentaje"],
                 "metodo":       p.get("metodo_pago") or "gratuito",
                 "es_gratuito":  p.get("es_gratuito", False),
-                "professional": p["professional"]
+                "professional": prof,
             })
 
+            if prof not in profesionales_detalle:
+                profesionales_detalle[prof] = {"monto": 0, "retencion": 0, "neto": 0, "pagos": 0}
+            profesionales_detalle[prof]["monto"]     += monto
+            profesionales_detalle[prof]["retencion"] += comision["retencion"]
+            profesionales_detalle[prof]["neto"]      += comision["neto"]
+            profesionales_detalle[prof]["pagos"]     += 1
+
+    # Gastos manuales
     gastos_total     = 0
     gastos_detalle   = []
     gastos_por_grupo = {}
@@ -106,26 +125,30 @@ def _resumen_mes(mes: str) -> dict:
                 "categoria":   gasto["categoria"],
                 "descripcion": gasto.get("descripcion", ""),
                 "monto":       -monto,
-                "created_at":  gasto.get("created_at", "")
+                "created_at":  gasto.get("created_at", ""),
             })
         gastos_por_grupo[GRUPOS_LABELS.get(grupo, grupo)] = grupo_total
 
-    utilidad_neta = ingresos_total - anulados_total - gastos_total
+    # Pago profesionales como gasto automático
+    gastos_por_grupo["Pago Profesionales"] = pago_profesionales
+
+    utilidad_neta = ingresos_total - anulados_total - pago_profesionales - gastos_total
 
     return {
-        "mes":              mes,
-        "ingresos_total":   ingresos_total,
-        "anulados_total":   anulados_total,
-        "gastos_total":     gastos_total,
-        "utilidad_neta":    utilidad_neta,
-        "ingresos":         sorted(ingresos_detalle, key=lambda x: (x["fecha"], x["time"])),
-        "anulados":         sorted(anulados_detalle,  key=lambda x: (x["fecha"], x["time"])),
-        "gastos":           sorted(gastos_detalle,    key=lambda x: x["created_at"]),
-        "gastos_por_grupo": gastos_por_grupo,
+        "mes":                    mes,
+        "ingresos_total":         ingresos_total,
+        "anulados_total":         anulados_total,
+        "pago_profesionales":     pago_profesionales,
+        "gastos_total":           gastos_total,
+        "utilidad_neta":          utilidad_neta,
+        "ingresos":               sorted(ingresos_detalle,  key=lambda x: (x["fecha"], x["time"])),
+        "anulados":               sorted(anulados_detalle,   key=lambda x: (x["fecha"], x["time"])),
+        "gastos":                 sorted(gastos_detalle,     key=lambda x: x["created_at"]),
+        "gastos_por_grupo":       gastos_por_grupo,
+        "profesionales_detalle":  profesionales_detalle,
     }
 
 
-# FIX: agregado auth en ambos endpoints
 @router.get("/resumen/{mes}")
 def get_resumen(mes: str, auth: dict = Depends(require_internal_auth)):
     return _resumen_mes(mes)
@@ -140,17 +163,18 @@ def exportar_excel(mes: str, auth: dict = Depends(require_internal_auth)):
     data = _resumen_mes(mes)
     wb   = Workbook()
 
-    # ── Estilos ──
     NAVY      = "0D1B2A"
     BLUE      = "1E40AF"
     GREEN     = "166534"
     RED       = "991B1B"
     YELLOW    = "854D0E"
+    PURPLE    = "5B21B6"
     BG_GRAY   = "F1F5F9"
     BG_GREEN  = "F0FDF4"
     BG_RED    = "FEF2F2"
     BG_BLUE   = "EFF6FF"
     BG_YELLOW = "FEFCE8"
+    BG_PURPLE = "F5F3FF"
 
     def header_font(color=None):
         return Font(name="Arial", bold=True, color=color or "FFFFFF", size=11)
@@ -188,10 +212,11 @@ def exportar_excel(mes: str, auth: dict = Depends(require_internal_auth)):
     ws.row_dimensions[2].height = 18
 
     kpis = [
-        ("Ingresos totales",  data["ingresos_total"],  BG_GREEN,  GREEN),
-        ("Anulaciones",      -data["anulados_total"],   BG_RED,    RED),
-        ("Gastos totales",   -data["gastos_total"],     BG_YELLOW, YELLOW),
-        ("Utilidad neta",     data["utilidad_neta"],    BG_BLUE,   BLUE),
+        ("Ingresos brutos",       data["ingresos_total"],         BG_GREEN,  GREEN),
+        ("Anulaciones",          -data["anulados_total"],          BG_RED,    RED),
+        ("Pago profesionales",   -data["pago_profesionales"],      BG_PURPLE, PURPLE),
+        ("Gastos operacionales", -data["gastos_total"],            BG_YELLOW, YELLOW),
+        ("Utilidad neta",         data["utilidad_neta"],           BG_BLUE,   BLUE),
     ]
 
     ws.row_dimensions[4].height = 14
@@ -206,12 +231,13 @@ def exportar_excel(mes: str, auth: dict = Depends(require_internal_auth)):
         ws.cell(row=5, column=col).fill      = fill(bg)
         ws.cell(row=5, column=col).border    = border()
         cell = ws.cell(row=6, column=col, value=valor)
-        cell.font          = Font(name="Arial", size=16, bold=True, color=color)
+        cell.font          = Font(name="Arial", size=14, bold=True, color=color)
         cell.alignment     = center()
         cell.fill          = fill(bg)
         cell.number_format = "$#,##0;($#,##0);\"-\""
         cell.border        = border()
 
+    # Gastos por grupo
     ws["A9"] = "Gastos por grupo"
     ws["A9"].font = Font(name="Arial", bold=True, size=11, color=NAVY)
     ws.row_dimensions[9].height = 22
@@ -225,20 +251,49 @@ def exportar_excel(mes: str, auth: dict = Depends(require_internal_auth)):
 
     row = 11
     for grupo, total in data["gastos_por_grupo"].items():
-        ws.cell(row=row, column=1, value=grupo).font   = cell_font()
+        es_prof = grupo == "Pago Profesionales"
+        bg_row  = BG_PURPLE if es_prof else BG_GRAY
+        color_row = PURPLE if es_prof else RED
+        label = f"{grupo} {'(automático)' if es_prof else ''}"
+        ws.cell(row=row, column=1, value=label).font   = cell_font(bold=es_prof)
         ws.cell(row=row, column=1).border = border()
-        ws.cell(row=row, column=1).fill   = fill(BG_GRAY)
+        ws.cell(row=row, column=1).fill   = fill(bg_row)
         mc = ws.cell(row=row, column=2, value=-total)
-        mc.font          = cell_font(bold=True, color=RED)
+        mc.font          = cell_font(bold=True, color=color_row)
         mc.number_format = "$#,##0;($#,##0);\"-\""
         mc.border        = border()
-        mc.fill          = fill(BG_GRAY)
+        mc.fill          = fill(bg_row)
         row += 1
 
-    ws.column_dimensions["A"].width = 28
-    ws.column_dimensions["B"].width = 18
-    ws.column_dimensions["C"].width = 18
-    ws.column_dimensions["D"].width = 18
+    # Detalle por profesional
+    ws[f"A{row+1}"] = "Detalle pago profesionales"
+    ws[f"A{row+1}"].font = Font(name="Arial", bold=True, size=11, color=NAVY)
+
+    for j, h in enumerate(["Profesional", "Pagos", "Bruto", "Retención centro", "Neto pagado"]):
+        cell = ws.cell(row=row+2, column=j+1, value=h)
+        cell.font      = header_font()
+        cell.fill      = fill(PURPLE)
+        cell.alignment = center()
+        cell.border    = border()
+
+    pr = row + 3
+    for prof, vals in data["profesionales_detalle"].items():
+        ws.cell(row=pr, column=1, value=prof).font   = cell_font()
+        ws.cell(row=pr, column=1).border = border()
+        ws.cell(row=pr, column=1).fill   = fill(BG_PURPLE)
+        ws.cell(row=pr, column=2, value=vals["pagos"]).font   = cell_font()
+        ws.cell(row=pr, column=2).border = border()
+        ws.cell(row=pr, column=2).fill   = fill(BG_PURPLE)
+        for col_idx, key, color_val in [(3, "monto", GREEN), (4, "retencion", BLUE), (5, "neto", PURPLE)]:
+            c = ws.cell(row=pr, column=col_idx, value=vals[key])
+            c.font          = cell_font(bold=True, color=color_val)
+            c.number_format = "$#,##0;($#,##0);\"-\""
+            c.border        = border()
+            c.fill          = fill(BG_PURPLE)
+        pr += 1
+
+    for col, w in zip("ABCDE", [32, 10, 18, 18, 18]):
+        ws.column_dimensions[col].width = w
 
     # ======================================================
     # HOJA 2 — INGRESOS
@@ -246,13 +301,14 @@ def exportar_excel(mes: str, auth: dict = Depends(require_internal_auth)):
     ws2 = wb.create_sheet("Ingresos")
     ws2.sheet_view.showGridLines = False
 
-    ws2.merge_cells("A1:G1")
+    ws2.merge_cells("A1:I1")
     ws2["A1"] = f"Ingresos — {mes}"
     ws2["A1"].font      = Font(name="Arial", bold=True, size=13, color=NAVY)
     ws2["A1"].alignment = center()
     ws2.row_dimensions[1].height = 28
 
-    for j, h in enumerate(["Fecha", "Hora", "RUT", "Tipo atención", "Profesional", "Método", "Monto ($)"]):
+    for j, h in enumerate(["Fecha", "Hora", "RUT", "Tipo atención", "Profesional",
+                            "Método", "Bruto ($)", "Retención ($)", "Neto prof. ($)"]):
         cell = ws2.cell(row=2, column=j+1, value=h)
         cell.font      = header_font()
         cell.fill      = fill(BLUE)
@@ -264,7 +320,8 @@ def exportar_excel(mes: str, auth: dict = Depends(require_internal_auth)):
         row = i + 3
         bg = "FFFFFF" if i % 2 == 0 else BG_GRAY
         for j, v in enumerate([ing["fecha"], ing["time"], ing["rut"], ing["tipo"],
-                                ing["professional"], ing["metodo"], ing["monto"]]):
+                                ing["professional"], ing["metodo"],
+                                ing["monto"], ing["retencion"], ing["neto"]]):
             c = ws2.cell(row=row, column=j+1, value=v)
             c.font   = cell_font()
             c.fill   = fill(bg)
@@ -272,6 +329,12 @@ def exportar_excel(mes: str, auth: dict = Depends(require_internal_auth)):
             if j == 6:
                 c.number_format = "$#,##0;($#,##0);\"-\""
                 c.font = cell_font(bold=True, color=GREEN)
+            if j == 7:
+                c.number_format = "$#,##0;($#,##0);\"-\""
+                c.font = cell_font(bold=True, color=BLUE)
+            if j == 8:
+                c.number_format = "$#,##0;($#,##0);\"-\""
+                c.font = cell_font(bold=True, color=PURPLE)
 
     total_row = len(data["ingresos"]) + 3
     ws2.cell(row=total_row, column=6, value="TOTAL").font   = header_font(NAVY)
@@ -283,7 +346,7 @@ def exportar_excel(mes: str, auth: dict = Depends(require_internal_auth)):
     tc.fill          = fill(BG_GREEN)
     tc.border        = border()
 
-    for col, w in zip("ABCDEFG", [12, 8, 14, 20, 16, 14, 14]):
+    for col, w in zip("ABCDEFGHI", [12, 8, 14, 20, 16, 14, 14, 14, 14]):
         ws2.column_dimensions[col].width = w
 
     # ======================================================
@@ -337,7 +400,7 @@ def exportar_excel(mes: str, auth: dict = Depends(require_internal_auth)):
     ws4 = wb.create_sheet("Gastos")
     ws4.sheet_view.showGridLines = False
 
-    ws4.merge_cells("A1:F1")
+    ws4.merge_cells("A1:E1")
     ws4["A1"] = f"Gastos — {mes}"
     ws4["A1"].font      = Font(name="Arial", bold=True, size=13, color=NAVY)
     ws4["A1"].alignment = center()
