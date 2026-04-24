@@ -719,3 +719,59 @@ def get_pdf_mes(
         media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
+# =========================
+# COMISIONES — configuración
+# Solo admin puede modificar
+# =========================
+
+from modules.caja.comisiones_store import (
+    get_all        as comisiones_get_all,
+    get_porcentaje as comisiones_get_porcentaje,
+    set_porcentaje as comisiones_set_porcentaje,
+    delete_porcentaje as comisiones_delete_porcentaje,
+)
+
+@router.get("/comisiones")
+def get_comisiones(auth: dict = Depends(require_internal_auth)):
+    if auth["role"]["name"] != "admin":
+        raise HTTPException(status_code=403, detail="Solo admin puede ver comisiones")
+    return comisiones_get_all()
+
+
+@router.put("/comisiones/default")
+def set_comision_default(
+    body: dict,
+    auth: dict = Depends(require_internal_auth),
+):
+    if auth["role"]["name"] != "admin":
+        raise HTTPException(status_code=403, detail="Solo admin puede modificar comisiones")
+    porcentaje = body.get("porcentaje")
+    if porcentaje is None or not (0 <= porcentaje <= 100):
+        raise HTTPException(status_code=400, detail="porcentaje debe ser entre 0 y 100")
+    return comisiones_set_porcentaje("default", porcentaje)
+
+
+@router.put("/comisiones/{professional}")
+def set_comision_profesional(
+    professional: str,
+    body: dict,
+    auth: dict = Depends(require_internal_auth),
+):
+    if auth["role"]["name"] != "admin":
+        raise HTTPException(status_code=403, detail="Solo admin puede modificar comisiones")
+    porcentaje = body.get("porcentaje")
+    if porcentaje is None or not (0 <= porcentaje <= 100):
+        raise HTTPException(status_code=400, detail="porcentaje debe ser entre 0 y 100")
+    return comisiones_set_porcentaje(professional, porcentaje)
+
+
+@router.delete("/comisiones/{professional}")
+def delete_comision_profesional(
+    professional: str,
+    auth: dict = Depends(require_internal_auth),
+):
+    if auth["role"]["name"] != "admin":
+        raise HTTPException(status_code=403, detail="Solo admin puede eliminar comisiones")
+    if professional == "default":
+        raise HTTPException(status_code=400, detail="No se puede eliminar el porcentaje default")
+    return comisiones_delete_porcentaje(professional)
