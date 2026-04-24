@@ -566,9 +566,10 @@ def get_resumen_dia(
 @router.get("/resumen-mes")
 def get_resumen_mes(
     month: str,
+    professional: Optional[str] = Query(None),
     auth: dict = Depends(require_internal_auth),
 ):
-    professional = _resolve_professional(auth)
+    professional = _resolve_professional(auth, professional)
     return _compute_resumen_mes(month, professional)
 
 # =========================
