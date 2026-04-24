@@ -15,7 +15,7 @@ import io
 from pathlib import Path
 from datetime import datetime, date as date_type
 from collections import defaultdict
-
+from modules.caja.comisiones_store import calcular as calcular_comision
 from modules.caja.caja_config_helper import get_tipos_profesional, get_valor_tipo
 from auth.internal_auth import require_internal_auth
 
@@ -383,7 +383,6 @@ def _get_caja_day_raw(date: str, professional: str) -> dict:
 
 
 def _get_caja_summary(date: str, professional: str) -> dict:
-    """Lógica pura de summary sin auth. Llamada internamente por resumen-dia."""
     day   = _get_caja_day_raw(date, professional)
     slots = day["slots"]
     pagos = _load_pagos_day(date, professional)
@@ -415,13 +414,17 @@ def _get_caja_summary(date: str, professional: str) -> dict:
         })
 
     pacientes.sort(key=lambda x: x["time"])
+    comision = calcular_comision(professional, monto_total)
+
     return {
         "date": date, "professional": professional,
         "total_pacientes": total_pacientes, "esperando": esperando,
         "pagados": pagados, "monto_total": monto_total,
+        "retencion": comision["retencion"],
+        "neto":      comision["neto"],
+        "porcentaje_comision": comision["porcentaje"],
         "por_tipo": por_tipo, "por_metodo": por_metodo, "pacientes": pacientes,
     }
-
 
 def _compute_resumen_mes(month: str, professional: Optional[str] = None) -> dict:
     """
@@ -443,7 +446,7 @@ def _compute_resumen_mes(month: str, professional: Optional[str] = None) -> dict
     total_pagos    = 0
     total_anulados = 0
     por_dia        = defaultdict(int)
-    por_prof       = defaultdict(lambda: {"monto": 0, "pagos": 0})
+    por_prof       = defaultdict(lambda: {"monto": 0, "pagos": 0, "retencion": 0, "neto": 0})
     por_tipo       = defaultdict(lambda: {"count": 0, "monto": 0})
     por_metodo     = defaultdict(lambda: {"count": 0, "monto": 0})
     pagos_list     = []
@@ -468,6 +471,9 @@ def _compute_resumen_mes(month: str, professional: Optional[str] = None) -> dict
                 por_dia[date_key]        += monto
                 por_prof[prof]["monto"]  += monto
                 por_prof[prof]["pagos"]  += 1
+                c = calcular_comision(prof, monto)
+                por_prof[prof]["retencion"] += c["retencion"]
+                por_prof[prof]["neto"]      += c["neto"]
                 por_tipo[TIPOS_LABELS.get(tipo, tipo)]["count"] += 1
                 por_tipo[TIPOS_LABELS.get(tipo, tipo)]["monto"] += monto
                 por_metodo[met]["count"] += 1
