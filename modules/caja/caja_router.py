@@ -106,8 +106,11 @@ def _load_agenda_day(date: str, professional: str) -> dict:
     return store.get("calendar", {}).get(date, {}).get(professional, {}).get("slots", {})
 
 def _load_agenda_professionals(date: str) -> List[str]:
+    from core.professionals_store import list_professionals
+    valid_ids = {p["id"] for p in list_professionals()}
     store = _load_json(AGENDA_PATH)
-    return list(store.get("calendar", {}).get(date, {}).keys())
+    keys = store.get("calendar", {}).get(date, {}).keys()
+    return [k for k in keys if k in valid_ids]
 
 def _load_caja_slot(date: str, professional: str, time: str) -> dict:
     store = _load_json(_caja_path(date))
