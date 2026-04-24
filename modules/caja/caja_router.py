@@ -1,8 +1,5 @@
 # ============================================================
-# caja_router.py  —  PARTE 1 de 2
-# Imports, constantes, helpers, schemas
-# Endpoints de escritura: /config, /day, /slot (PATCH/DELETE),
-#                         /pago, /anular
+# caja_router.py  —  PARTE 1 de 3
 # ============================================================
 
 from fastapi import APIRouter, HTTPException, Query, Depends
@@ -15,23 +12,18 @@ import io
 from pathlib import Path
 from datetime import datetime, date as date_type
 from collections import defaultdict
-from modules.caja.comisiones_store import calcular as calcular_comision
+
 from modules.caja.caja_config_helper import get_tipos_profesional, get_valor_tipo
 from auth.internal_auth import require_internal_auth
+from modules.caja.comisiones_store import calcular as calcular_comision
 
 router = APIRouter(prefix="/api/caja", tags=["Caja"])
 
-# ----------------------------------------------------------
-# Rutas de datos (disco persistente de Render → /data)
-# ----------------------------------------------------------
 CAJA_DIR    = Path("/data/caja")
 PAGOS_DIR   = Path("/data/pagos")
 AGENDA_PATH = Path("/data/agenda_future.json")
 CONFIG_PATH = Path(os.path.dirname(__file__)) / "caja_config.json"
 
-# ----------------------------------------------------------
-# Constantes de dominio
-# ----------------------------------------------------------
 TIPOS_VALIDOS = {
     "particular", "control_costo", "control_gratuito",
     "sobrecupo", "kinesiologia", "paquete_10"
@@ -49,28 +41,15 @@ TIPOS_LABELS = {
     "paquete_10":       "Paquete 10 sesiones",
 }
 
-# ----------------------------------------------------------
-# Control de acceso por rol
-# admin y secretaria ven todos los profesionales.
-# medico y kinesiologia solo ven el suyo propio.
-# ----------------------------------------------------------
 ROLES_ADMIN = {"admin", "secretaria"}
 
 def _can_see_all(auth: dict) -> bool:
     return auth["role"]["name"] in ROLES_ADMIN
 
 def _resolve_professional(auth: dict, requested: Optional[str] = None) -> Optional[str]:
-    """
-    Si es admin/secretaria → devuelve `requested` tal cual (None = todos).
-    Si es médico/kine      → fuerza auth['professional'], ignorando `requested`.
-    """
     if _can_see_all(auth):
         return requested
     return auth["professional"]
-
-# =========================
-# HELPERS — I/O de disco
-# =========================
 
 def _month_key(date: str) -> str:
     return date[:7]
@@ -148,10 +127,6 @@ def _save_pago(date: str, professional: str, time: str, pago: dict) -> None:
 def _format_monto(monto: int) -> str:
     return f"${monto:,}".replace(",", ".")
 
-# =========================
-# SCHEMAS
-# =========================
-
 class CajaUpdate(BaseModel):
     date:           str
     professional:   str
@@ -183,21 +158,12 @@ class AnulacionCreate(BaseModel):
     motivo:       str
     anulado_por:  Optional[str] = None
 
-# =========================
-# GET — config
-# =========================
-
 @router.get("/config")
 def get_config(professional: Optional[str] = Query(None)):
     if professional:
         return get_tipos_profesional(professional)
     config = _load_config()
     return {k: v for k, v in config.items() if k != "por_profesional"}
-
-# =========================
-# GET — panel del día
-# Filtrado por rol: médico/kine solo ven su propio profesional
-# =========================
 
 @router.get("/day")
 def get_caja_day(
@@ -206,10 +172,8 @@ def get_caja_day(
     auth: dict = Depends(require_internal_auth),
 ):
     professional = _resolve_professional(auth, professional)
-
     agenda_slots = _load_agenda_day(date, professional)
     caja         = _load_caja_day(date, professional)
-
     result = []
     for time, slot in agenda_slots.items():
         if slot.get("status") not in ("reserved", "confirmed"):
@@ -226,14 +190,8 @@ def get_caja_day(
             "pagado":         cs.get("pagado", False),
             "es_gratuito":    tipo in TIPOS_GRATUITOS,
         })
-
     result.sort(key=lambda x: x["time"])
     return {"date": date, "professional": professional, "slots": result}
-
-# =========================
-# PATCH — actualizar slot
-# FIX: agregado auth para normalizar professional con _resolve_professional
-# =========================
 
 @router.patch("/slot")
 def update_caja_slot(data: CajaUpdate, auth: dict = Depends(require_internal_auth)):
@@ -241,9 +199,7 @@ def update_caja_slot(data: CajaUpdate, auth: dict = Depends(require_internal_aut
         raise HTTPException(status_code=400, detail="arrival_status inválido")
     if data.tipo_atencion and data.tipo_atencion not in TIPOS_VALIDOS:
         raise HTTPException(status_code=400, detail="tipo_atencion inválido")
-
     professional = _resolve_professional(auth, data.professional)
-
     cs = _load_caja_slot(data.date, professional, data.time)
     if data.arrival_status is not None:
         cs["arrival_status"] = data.arrival_status
@@ -253,14 +209,8 @@ def update_caja_slot(data: CajaUpdate, auth: dict = Depends(require_internal_aut
         cs["es_gratuito"]   = data.tipo_atencion in TIPOS_GRATUITOS
     if data.pagado is not None:
         cs["pagado"] = data.pagado
-
     _save_caja_slot(data.date, professional, data.time, cs)
     return {"ok": True, "time": data.time}
-
-# =========================
-# DELETE — limpiar slot
-# FIX: agregado auth para normalizar professional con _resolve_professional
-# =========================
 
 @router.delete("/slot")
 def delete_caja_slot(data: CajaSlotDelete, auth: dict = Depends(require_internal_auth)):
@@ -268,28 +218,18 @@ def delete_caja_slot(data: CajaSlotDelete, auth: dict = Depends(require_internal
     _delete_caja_slot(data.date, professional, data.time)
     return {"ok": True, "time": data.time}
 
-# =========================
-# POST — registrar pago
-# FIX: agregado auth + _resolve_professional para usar siempre el id canónico
-# =========================
-
 @router.post("/pago")
 def registrar_pago(data: PagoCreate, auth: dict = Depends(require_internal_auth)):
     professional = _resolve_professional(auth, data.professional)
-
     if data.tipo_atencion not in TIPOS_VALIDOS:
         raise HTTPException(status_code=400, detail="tipo_atencion inválido")
-
     es_gratuito = data.tipo_atencion in TIPOS_GRATUITOS
-
     if not es_gratuito:
         if not data.metodo_pago or data.metodo_pago not in METODOS_VALIDOS:
             raise HTTPException(status_code=400, detail="metodo_pago inválido")
         if data.metodo_pago in ("transferencia", "tarjeta") and not data.numero_operacion:
             raise HTTPException(status_code=400, detail="numero_operacion requerido")
-
     monto = get_valor_tipo(professional, data.tipo_atencion)
-
     _save_pago(data.date, professional, data.time, {
         "rut":              data.rut,
         "tipo_atencion":    data.tipo_atencion,
@@ -305,61 +245,37 @@ def registrar_pago(data: PagoCreate, auth: dict = Depends(require_internal_auth)
         "anulacion_at":     None,
         "anulado_por":      None,
     })
-
     cs = _load_caja_slot(data.date, professional, data.time)
     cs["arrival_status"] = "paid"
     cs["pagado"]         = True
     cs["tipo_atencion"]  = data.tipo_atencion
     cs["monto"]          = monto
     _save_caja_slot(data.date, professional, data.time, cs)
-
     return {"ok": True, "monto": monto, "es_gratuito": es_gratuito}
-
-# =========================
-# POST — anular pago
-# FIX: agregado auth + _resolve_professional para usar siempre el id canónico
-# =========================
 
 @router.post("/anular")
 def anular_pago(data: AnulacionCreate, auth: dict = Depends(require_internal_auth)):
     professional = _resolve_professional(auth, data.professional)
-
     pagos = _load_pagos_day(data.date, professional)
-
     if data.time not in pagos:
         raise HTTPException(status_code=404, detail="Pago no encontrado")
     if pagos[data.time].get("anulado"):
         raise HTTPException(status_code=400, detail="Pago ya anulado")
-
     pagos[data.time]["anulado"]          = True
     pagos[data.time]["anulacion_motivo"] = data.motivo
     pagos[data.time]["anulacion_at"]     = datetime.now().isoformat(timespec="seconds")
     pagos[data.time]["anulado_por"]      = data.anulado_por
-
     path  = _pagos_path(data.date)
     store = _load_json(path)
     store.setdefault(data.date, {}).setdefault(professional, {})[data.time] = pagos[data.time]
     _save_json(path, store)
-
     _delete_caja_slot(data.date, professional, data.time)
     return {"ok": True}
-
-
+    # ============================================================
+# caja_router.py  —  PARTE 2 de 3
 # ============================================================
-# caja_router.py  —  PARTE 2 de 2
-# Endpoints de lectura con filtro por rol:
-#   /summary, /resumen-dia, /resumen-mes, /pdf-mes
-#
-# PEGAR A CONTINUACIÓN DE LA PARTE 1 (mismo archivo)
-# ============================================================
-
-# =========================
-# HELPER INTERNO — día sin auth
-# Usado por _get_caja_summary para no llamar al endpoint con Depends
-# =========================
 
 def _get_caja_day_raw(date: str, professional: str) -> dict:
-    """Versión sin auth de GET /day. Solo para llamadas internas."""
     agenda_slots = _load_agenda_day(date, professional)
     caja         = _load_caja_day(date, professional)
     result = []
@@ -420,23 +336,20 @@ def _get_caja_summary(date: str, professional: str) -> dict:
         "date": date, "professional": professional,
         "total_pacientes": total_pacientes, "esperando": esperando,
         "pagados": pagados, "monto_total": monto_total,
-        "retencion": comision["retencion"],
-        "neto":      comision["neto"],
+        "retencion":           comision["retencion"],
+        "neto":                comision["neto"],
         "porcentaje_comision": comision["porcentaje"],
         "por_tipo": por_tipo, "por_metodo": por_metodo, "pacientes": pacientes,
     }
 
+
 def _compute_resumen_mes(month: str, professional: Optional[str] = None) -> dict:
-    """
-    Lógica pura de resumen mensual sin auth.
-    professional=None → todos los profesionales (solo admin/secretaria llegan aquí con None).
-    """
     path  = _pagos_path_by_month(month)
     store = _load_json(path)
 
     if not store:
         return {
-            "month": month, "monto_total": 0,
+            "month": month, "monto_total": 0, "retencion_total": 0, "neto_total": 0,
             "total_pagos": 0, "total_anulados": 0,
             "por_dia": [], "por_profesional": {},
             "por_tipo": {}, "por_metodo": {}, "pagos": []
@@ -453,7 +366,6 @@ def _compute_resumen_mes(month: str, professional: Optional[str] = None) -> dict
 
     for date_key, profs in store.items():
         for prof, slots in profs.items():
-            # Filtrar por profesional si el rol lo requiere
             if professional and prof != professional:
                 continue
 
@@ -471,9 +383,9 @@ def _compute_resumen_mes(month: str, professional: Optional[str] = None) -> dict
                 por_dia[date_key]        += monto
                 por_prof[prof]["monto"]  += monto
                 por_prof[prof]["pagos"]  += 1
-                c = calcular_comision(prof, monto)
-                por_prof[prof]["retencion"] += c["retencion"]
-                por_prof[prof]["neto"]      += c["neto"]
+                _c = calcular_comision(prof, monto)
+                por_prof[prof]["retencion"] += _c["retencion"]
+                por_prof[prof]["neto"]      += _c["neto"]
                 por_tipo[TIPOS_LABELS.get(tipo, tipo)]["count"] += 1
                 por_tipo[TIPOS_LABELS.get(tipo, tipo)]["monto"] += monto
                 por_metodo[met]["count"] += 1
@@ -493,11 +405,15 @@ def _compute_resumen_mes(month: str, professional: Optional[str] = None) -> dict
                 })
 
     pagos_list.sort(key=lambda x: (x["date"], x["time"]))
-    por_dia_list = [{"date": d, "monto": m} for d, m in sorted(por_dia.items())]
+    por_dia_list    = [{"date": d, "monto": m} for d, m in sorted(por_dia.items())]
+    retencion_total = sum(v["retencion"] for v in por_prof.values())
+    neto_total      = sum(v["neto"]      for v in por_prof.values())
 
     return {
         "month":           month,
         "monto_total":     monto_total,
+        "retencion_total": retencion_total,
+        "neto_total":      neto_total,
         "total_pagos":     total_pagos,
         "total_anulados":  total_anulados,
         "por_dia":         por_dia_list,
@@ -507,9 +423,6 @@ def _compute_resumen_mes(month: str, professional: Optional[str] = None) -> dict
         "pagos":           pagos_list,
     }
 
-# =========================
-# GET — resumen día (un profesional)
-# =========================
 
 @router.get("/summary")
 def get_caja_summary(
@@ -520,9 +433,6 @@ def get_caja_summary(
     professional = _resolve_professional(auth, professional)
     return _get_caja_summary(date, professional)
 
-# =========================
-# GET — resumen día (todos los profesionales)
-# =========================
 
 @router.get("/resumen-dia")
 def get_resumen_dia(
@@ -535,6 +445,8 @@ def get_resumen_dia(
 
     resumen_por_prof  = []
     total_global      = 0
+    retencion_global  = 0
+    neto_global       = 0
     por_tipo_global   = {}
     por_metodo_global = {}
     pacientes_global  = []
@@ -547,8 +459,13 @@ def get_resumen_dia(
             "pagados":         s["pagados"],
             "esperando":       s["esperando"],
             "monto_total":     s["monto_total"],
+            "retencion":       s["retencion"],
+            "neto":            s["neto"],
+            "porcentaje_comision": s["porcentaje_comision"],
         })
-        total_global += s["monto_total"]
+        total_global     += s["monto_total"]
+        retencion_global += s["retencion"]
+        neto_global      += s["neto"]
         for t, v in s["por_tipo"].items():
             por_tipo_global[t]   = por_tipo_global.get(t, 0) + v
         for m, v in s["por_metodo"].items():
@@ -561,13 +478,12 @@ def get_resumen_dia(
 
     return {
         "date": date, "monto_total": total_global,
+        "retencion_total": retencion_global,
+        "neto_total":      neto_global,
         "por_tipo": por_tipo_labeled, "por_metodo": por_metodo_global,
         "por_profesional": resumen_por_prof, "pacientes": pacientes_global,
     }
 
-# =========================
-# GET — resumen mensual (contable)
-# =========================
 
 @router.get("/resumen-mes")
 def get_resumen_mes(
@@ -577,12 +493,9 @@ def get_resumen_mes(
 ):
     professional = _resolve_professional(auth, professional)
     return _compute_resumen_mes(month, professional)
-
-# =========================
-# GET — exportar PDF mensual
-# Médico/kine → PDF solo con sus datos + nombre de archivo personalizado
-# Admin/secretaria → PDF con todos los profesionales
-# =========================
+    # ============================================================
+# caja_router.py  —  PARTE 3 de 3
+# ============================================================
 
 @router.get("/pdf-mes")
 def get_pdf_mes(
@@ -621,12 +534,17 @@ def get_pdf_mes(
     story.append(Paragraph(subtitle, sub_style))
     story.append(Spacer(1, 0.3*cm))
 
-    # KPIs
     kpi_data = [
-        ["Total recaudado", "Total pagos", "Anulados"],
-        [_format_monto(data["monto_total"]), str(data["total_pagos"]), str(data["total_anulados"])]
+        ["Total recaudado", "Retención", "Neto", "Total pagos", "Anulados"],
+        [
+            _format_monto(data["monto_total"]),
+            _format_monto(data["retencion_total"]),
+            _format_monto(data["neto_total"]),
+            str(data["total_pagos"]),
+            str(data["total_anulados"]),
+        ]
     ]
-    kpi_table = Table(kpi_data, colWidths=[5.5*cm, 5.5*cm, 5.5*cm])
+    kpi_table = Table(kpi_data, colWidths=[3.5*cm, 3.5*cm, 3.5*cm, 3*cm, 3*cm])
     kpi_table.setStyle(TableStyle([
         ("BACKGROUND",     (0,0), (-1,0), colors.HexColor("#0f172a")),
         ("TEXTCOLOR",      (0,0), (-1,0), colors.white),
@@ -642,13 +560,18 @@ def get_pdf_mes(
     story.append(kpi_table)
     story.append(Spacer(1, 0.5*cm))
 
-    # Tabla por profesional: solo visible para admin/secretaria
     if not professional:
         story.append(Paragraph("Por profesional", section_style))
-        prof_data = [["Profesional", "Pagos", "Total"]]
+        prof_data = [["Profesional", "Pagos", "Bruto", "Retención", "Neto"]]
         for prof, vals in data["por_profesional"].items():
-            prof_data.append([prof, str(vals["pagos"]), _format_monto(vals["monto"])])
-        prof_table = Table(prof_data, colWidths=[8*cm, 4*cm, 4.5*cm])
+            prof_data.append([
+                prof,
+                str(vals["pagos"]),
+                _format_monto(vals["monto"]),
+                _format_monto(vals["retencion"]),
+                _format_monto(vals["neto"]),
+            ])
+        prof_table = Table(prof_data, colWidths=[5*cm, 2.5*cm, 3.5*cm, 3.5*cm, 3*cm])
         prof_table.setStyle(TableStyle([
             ("BACKGROUND",     (0,0), (-1,0), colors.HexColor("#1e40af")),
             ("TEXTCOLOR",      (0,0), (-1,0), colors.white),
@@ -660,7 +583,6 @@ def get_pdf_mes(
         ]))
         story.append(prof_table)
 
-    # Por tipo de atención
     story.append(Paragraph("Por tipo de atención", section_style))
     tipo_data = [["Tipo", "Cantidad", "Total"]]
     for tipo, vals in data["por_tipo"].items():
@@ -677,7 +599,6 @@ def get_pdf_mes(
     ]))
     story.append(tipo_table)
 
-    # Por método de pago
     story.append(Paragraph("Por método de pago", section_style))
     met_data = [["Método", "Cantidad", "Total"]]
     for met, vals in data["por_metodo"].items():
@@ -694,7 +615,6 @@ def get_pdf_mes(
     ]))
     story.append(met_table)
 
-    # Detalle de pagos
     story.append(Paragraph("Detalle de pagos", section_style))
     det_data = [["Fecha", "Hora", "Profesional", "RUT", "Tipo", "Método", "Monto"]]
     for p in data["pagos"]:
@@ -725,15 +645,16 @@ def get_pdf_mes(
         media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
+
+
 # =========================
 # COMISIONES — configuración
-# Solo admin puede modificar
 # =========================
 
 from modules.caja.comisiones_store import (
-    get_all        as comisiones_get_all,
-    get_porcentaje as comisiones_get_porcentaje,
-    set_porcentaje as comisiones_set_porcentaje,
+    get_all           as comisiones_get_all,
+    get_porcentaje    as comisiones_get_porcentaje,
+    set_porcentaje    as comisiones_set_porcentaje,
     delete_porcentaje as comisiones_delete_porcentaje,
 )
 
@@ -743,12 +664,8 @@ def get_comisiones(auth: dict = Depends(require_internal_auth)):
         raise HTTPException(status_code=403, detail="Solo admin puede ver comisiones")
     return comisiones_get_all()
 
-
 @router.put("/comisiones/default")
-def set_comision_default(
-    body: dict,
-    auth: dict = Depends(require_internal_auth),
-):
+def set_comision_default(body: dict, auth: dict = Depends(require_internal_auth)):
     if auth["role"]["name"] != "admin":
         raise HTTPException(status_code=403, detail="Solo admin puede modificar comisiones")
     porcentaje = body.get("porcentaje")
@@ -756,13 +673,8 @@ def set_comision_default(
         raise HTTPException(status_code=400, detail="porcentaje debe ser entre 0 y 100")
     return comisiones_set_porcentaje("default", porcentaje)
 
-
 @router.put("/comisiones/{professional}")
-def set_comision_profesional(
-    professional: str,
-    body: dict,
-    auth: dict = Depends(require_internal_auth),
-):
+def set_comision_profesional(professional: str, body: dict, auth: dict = Depends(require_internal_auth)):
     if auth["role"]["name"] != "admin":
         raise HTTPException(status_code=403, detail="Solo admin puede modificar comisiones")
     porcentaje = body.get("porcentaje")
@@ -770,12 +682,8 @@ def set_comision_profesional(
         raise HTTPException(status_code=400, detail="porcentaje debe ser entre 0 y 100")
     return comisiones_set_porcentaje(professional, porcentaje)
 
-
 @router.delete("/comisiones/{professional}")
-def delete_comision_profesional(
-    professional: str,
-    auth: dict = Depends(require_internal_auth),
-):
+def delete_comision_profesional(professional: str, auth: dict = Depends(require_internal_auth)):
     if auth["role"]["name"] != "admin":
         raise HTTPException(status_code=403, detail="Solo admin puede eliminar comisiones")
     if professional == "default":
