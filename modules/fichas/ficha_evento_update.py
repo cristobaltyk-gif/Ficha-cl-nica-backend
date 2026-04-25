@@ -1,24 +1,16 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from threading import Lock
+import psycopg2
+import psycopg2.extras
+import os
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from typing import Dict, Any
 
 from fastapi import APIRouter, HTTPException, Depends
-
 from auth.internal_auth import require_internal_auth
 from modules.fichas.ficha_evento_schema import FichaEventoCreate
-
-
-# ===============================
-# CONFIG
-# ===============================
-
-BASE_DATA_PATH = Path("/data/pacientes")
-LOCK = Lock()
+from db.supabase_client import get_paciente, _get_conn, _utc_now
 
 router = APIRouter(
     prefix="/api/fichas/evento",
@@ -27,21 +19,9 @@ router = APIRouter(
 )
 
 
-# ===============================
-# HELPERS
-# ===============================
-
 def chile_today() -> str:
     return datetime.now(ZoneInfo("America/Santiago")).date().isoformat()
 
-
-def patient_dir(rut: str) -> Path:
-    return BASE_DATA_PATH / rut
-
-
-# ===============================
-# MODIFICAR EVENTO CLÍNICO
-# ===============================
 
 @router.put("")
 def update_clinical_event(
@@ -51,61 +31,40 @@ def update_clinical_event(
     """
     Modifica un evento clínico SOLO si fue creado hoy (fecha Chile).
     """
-
     rut = data.rut
+    fecha_hora = f"{data.fecha}_{data.hora.replace(':', '-')}"
 
-    with LOCK:
-        pdir = patient_dir(rut)
+    if not get_paciente(rut):
+        raise HTTPException(status_code=404, detail="La ficha del paciente no existe")
 
-        if not pdir.exists():
-            raise HTTPException(
-                status_code=404,
-                detail="La ficha del paciente no existe"
-            )
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, contenido, created_at FROM eventos
+                WHERE rut_paciente = %s AND fecha_hora = %s
+            """, (rut, fecha_hora))
+            row = cur.fetchone()
 
-        events_dir = pdir / "eventos"
+            if not row:
+                raise HTTPException(status_code=404, detail="Evento clínico no encontrado")
 
-        filename = f"{data.fecha}_{data.hora.replace(':','-')}.json"
-        file = events_dir / filename
+            created_at = str(row["created_at"])
+            created_date = created_at.split("T")[0][:10]
 
-        if not file.exists():
-            raise HTTPException(
-                status_code=404,
-                detail="Evento clínico no encontrado"
-            )
+            if created_date != chile_today():
+                raise HTTPException(
+                    status_code=403,
+                    detail="Solo se pueden modificar eventos creados hoy"
+                )
 
-        # Leer evento actual
-        evento_actual = json.loads(file.read_text(encoding="utf-8"))
+            evento_actual = dict(row["contenido"])
+            evento_actual.update(data.dict())
 
-        # Verificar fecha creación
-        created_at = evento_actual.get("created_at")
-        if not created_at:
-            raise HTTPException(
-                status_code=400,
-                detail="Evento sin timestamp válido"
-            )
+            cur.execute("""
+                UPDATE eventos
+                SET contenido = %s, updated_at = %s
+                WHERE id = %s
+            """, (json.dumps(evento_actual), _utc_now(), row["id"]))
+            conn.commit()
 
-        created_date = created_at.split("T")[0]
-
-        if created_date != chile_today():
-            raise HTTPException(
-                status_code=403,
-                detail="Solo se pueden modificar eventos creados hoy"
-            )
-
-        # Actualizar SOLO campos clínicos
-        evento_actual.update(data.dict())
-
-        # NO se cambia professional_id
-        # NO se cambia professional_name
-        # NO se cambia created_at
-
-        file.write_text(
-            json.dumps(evento_actual, indent=2, ensure_ascii=False),
-            encoding="utf-8"
-        )
-
-    return {
-        "status": "ok",
-        "rut": rut
-    }
+    return {"status": "ok", "rut": rut}
