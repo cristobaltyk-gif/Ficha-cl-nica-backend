@@ -1,40 +1,42 @@
 """
-backup_service.py
------------------
+services/backup_service.py
+--------------------------
 Backup diario automático de /data/*.json → Cloudflare R2
-Se integra al APScheduler existente del backend FastAPI ICA.
+Sigue el mismo patrón threading que modules/pagos/scheduler.py
 
-Requisitos:
-    pip install boto3 apscheduler
-
-Variables de entorno necesarias (agregar en Render):
-    R2_ACCOUNT_ID        → ID de tu cuenta Cloudflare
+Variables de entorno necesarias (ya agregadas en Render):
+    R2_ACCOUNT_ID        → ID cuenta Cloudflare
     R2_ACCESS_KEY_ID     → Access Key del token R2
     R2_SECRET_ACCESS_KEY → Secret Key del token R2
-    R2_BUCKET_NAME       → Nombre del bucket (ej: ica-backups)
+    R2_BUCKET_NAME       → ica-backups
 """
+
+from __future__ import annotations
 
 import os
 import tarfile
 import logging
 import tempfile
-from datetime import datetime, timezone
+import threading
+import time
+from datetime import datetime, timezone, date
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import boto3
 from botocore.config import Config
 
 logger = logging.getLogger(__name__)
 
-# ── Configuración ──────────────────────────────────────────────────────────────
+DATA_DIR      = Path("/data")
+CHILE_TZ      = ZoneInfo("America/Santiago")
+RETENTION_DAYS = 30
+BACKUP_HOUR   = 3   # 03:00 hora Chile — menor actividad
 
-DATA_DIR = Path("/data")
-RETENTION_DAYS = 30  # Backups a conservar en R2 (norma exige 15 años, pero
-                     # para backups diarios 30 días es suficiente — los datos
-                     # originales siguen en /data y en Render)
+
+# ── Cliente R2 ─────────────────────────────────────────────────────────────────
 
 def _get_r2_client():
-    """Crea cliente boto3 apuntando a Cloudflare R2."""
     account_id = os.environ["R2_ACCOUNT_ID"]
     return boto3.client(
         "s3",
@@ -46,114 +48,96 @@ def _get_r2_client():
     )
 
 
-# ── Lógica principal ───────────────────────────────────────────────────────────
+# ── Lógica de backup ───────────────────────────────────────────────────────────
 
 def run_backup():
     """
     1. Comprime todos los JSON de /data en un tar.gz con timestamp
-    2. Sube el archivo a R2
-    3. Elimina backups con más de RETENTION_DAYS días en R2
+    2. Sube el archivo a R2 bajo daily/
+    3. Elimina backups con más de RETENTION_DAYS días
     """
-    bucket = os.environ["R2_BUCKET_NAME"]
+    bucket    = os.environ["R2_BUCKET_NAME"]
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    backup_filename = f"ica_backup_{timestamp}.tar.gz"
+    filename  = f"ica_backup_{timestamp}.tar.gz"
 
-    # Verificar que hay archivos para respaldar
     json_files = list(DATA_DIR.rglob("*.json"))
     if not json_files:
-        logger.warning("[BACKUP] No se encontraron archivos JSON en %s", DATA_DIR)
+        print(f"⚠️  [BACKUP] No se encontraron archivos JSON en {DATA_DIR}")
         return
 
-    logger.info("[BACKUP] Iniciando backup de %d archivos JSON → %s", len(json_files), backup_filename)
+    print(f"📦 [BACKUP] Iniciando — {len(json_files)} archivos JSON → {filename}")
 
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
-            tar_path = Path(tmpdir) / backup_filename
+            tar_path = Path(tmpdir) / filename
 
-            # Comprimir todos los JSON
             with tarfile.open(tar_path, "w:gz") as tar:
                 for json_file in json_files:
-                    # Mantener estructura relativa desde /data
                     arcname = json_file.relative_to(DATA_DIR.parent)
                     tar.add(json_file, arcname=str(arcname))
 
             size_mb = tar_path.stat().st_size / (1024 * 1024)
-            logger.info("[BACKUP] Archivo comprimido: %.2f MB", size_mb)
+            print(f"📦 [BACKUP] Comprimido: {size_mb:.2f} MB")
 
-            # Subir a R2
             client = _get_r2_client()
             client.upload_file(
                 str(tar_path),
                 bucket,
-                f"daily/{backup_filename}",
+                f"daily/{filename}",
                 ExtraArgs={"ContentType": "application/gzip"},
             )
-            logger.info("[BACKUP] ✅ Subido exitosamente a R2: daily/%s", backup_filename)
+            print(f"✅ [BACKUP] Subido exitosamente → daily/{filename}")
 
-        # Limpiar backups antiguos en R2
         _cleanup_old_backups(client, bucket)
 
     except Exception as e:
-        logger.error("[BACKUP] ❌ Error durante el backup: %s", str(e), exc_info=True)
-        raise
+        print(f"❌ [BACKUP] Error durante el backup: {e}")
 
 
 def _cleanup_old_backups(client, bucket: str):
     """Elimina backups en R2 con más de RETENTION_DAYS días."""
     try:
         response = client.list_objects_v2(Bucket=bucket, Prefix="daily/")
-        objects = response.get("Contents", [])
-
-        now = datetime.now(timezone.utc)
-        deleted = 0
+        objects  = response.get("Contents", [])
+        now      = datetime.now(timezone.utc)
+        deleted  = 0
 
         for obj in objects:
             age_days = (now - obj["LastModified"]).days
             if age_days > RETENTION_DAYS:
                 client.delete_object(Bucket=bucket, Key=obj["Key"])
-                logger.info("[BACKUP] 🗑️  Eliminado backup antiguo: %s (%d días)", obj["Key"], age_days)
+                print(f"🗑️  [BACKUP] Eliminado backup antiguo: {obj['Key']} ({age_days} días)")
                 deleted += 1
 
-        if deleted:
-            logger.info("[BACKUP] Limpieza: %d backups eliminados", deleted)
-        else:
-            logger.info("[BACKUP] Sin backups antiguos que eliminar")
+        print(f"🧹 [BACKUP] Limpieza: {deleted} backups eliminados")
 
     except Exception as e:
-        logger.warning("[BACKUP] Error en limpieza de backups antiguos: %s", str(e))
+        print(f"⚠️  [BACKUP] Error en limpieza: {e}")
 
 
-# ── Integración con APScheduler ────────────────────────────────────────────────
+# ── Loop threading (mismo patrón que pagos/scheduler.py) ──────────────────────
 
-def register_backup_scheduler(scheduler):
-    """
-    Registra el job de backup en el APScheduler existente.
+def _loop():
+    print("🕐 [BACKUP] Scheduler backup iniciado — corre diario a las 03:00 Chile")
+    ultimo: date | None = None
+
+    while True:
+        ahora = datetime.now(CHILE_TZ)
+        hoy   = ahora.date()
+
+        if ahora.hour == BACKUP_HOUR and ahora.minute < 5 and ultimo != hoy:
+            print(f"🚀 [BACKUP] Ejecutando backup diario {hoy}…")
+            try:
+                run_backup()
+            except Exception as e:
+                print(f"❌ [BACKUP] Error en loop: {e}")
+            ultimo = hoy
+
+        time.sleep(60)
+
+
+def start_backup_scheduler():
+    t = threading.Thread(target=_loop, daemon=True)
+    t.start()
+    print("🚀 [BACKUP] Scheduler backup iniciado")
     
-    Uso en main.py o donde inicializas el scheduler:
-    
-        from backup_service import register_backup_scheduler
-        register_backup_scheduler(scheduler)
-    
-    Se ejecuta diariamente a las 03:00 hora Chile (UTC-3 / UTC-4 según DST).
-    Usamos UTC 06:00 para cubrir ambos casos.
-    """
-    scheduler.add_job(
-        run_backup,
-        trigger="cron",
-        hour=6,        # 06:00 UTC = 03:00 Chile (hora de menor actividad)
-        minute=0,
-        id="daily_backup_r2",
-        name="Backup diario JSON → Cloudflare R2",
-        replace_existing=True,
-        misfire_grace_time=3600,  # Si el server estaba caído, ejecuta hasta 1h después
-    )
-    logger.info("[BACKUP] ✅ Scheduler de backup registrado — diario 03:00 Chile")
-
-
-# ── Ejecución manual (para testing) ───────────────────────────────────────────
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    logger.info("Ejecutando backup manual...")
-    run_backup()
-    logger.info("Backup manual completado.")
