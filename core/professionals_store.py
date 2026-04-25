@@ -1,158 +1,92 @@
+"""
+core/professionals_store.py
+---------------------------
+Reemplaza lectura/escritura de /data/professionals.json → Supabase
+Mantiene la misma interfaz para compatibilidad.
+"""
+from __future__ import annotations
+
 import json
-from pathlib import Path
-from threading import Lock
-from typing import Dict, Any
-
-DATA_FILE  = Path("/data/professionals.json")
-USERS_FILE = Path("/data/users.json")
-SEDES_FILE = Path("/data/sedes.json")
-LOCK = Lock()
-
-
-def _read_json() -> Dict[str, Any]:
-    if not DATA_FILE.exists():
-        DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
-        DATA_FILE.write_text("{}", encoding="utf-8")
-        return {}
-    with open(DATA_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def _write_json(data: Dict[str, Any]) -> None:
-    DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-
-
-def _read_users() -> Dict[str, Any]:
-    if not USERS_FILE.exists():
-        return {}
-    with open(USERS_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def _write_users(data: Dict[str, Any]) -> None:
-    USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(USERS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-
-
-def _read_sedes() -> Dict[str, Any]:
-    if not SEDES_FILE.exists():
-        return {}
-    with open(SEDES_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def _write_sedes(data: Dict[str, Any]) -> None:
-    SEDES_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(SEDES_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+from typing import Dict, Any, List, Optional
+from db.supabase_client import _get_conn, _utc_now, get_profesionales, save_profesional
+from db.supabase_client import get_users, save_user
 
 
 def _es_interno(p: Dict[str, Any]) -> bool:
-    """
-    Detecta profesionales internos (ocultos al público).
-    Cubre todas las variantes de nombre del profesional IA.
-    """
     id_str   = str(p.get("id", "")).lower().replace(" ", "_")
-    user_str = str(p.get("username", "")).lower().replace(" ", "_")
     name_str = str(p.get("name", "")).lower()
-
     return (
         id_str.startswith("ia_") or
-        id_str.startswith("ia ") or
-        user_str.startswith("ia_") or
         "prediagnóstico" in name_str or
-        "prediagnostico" in name_str or
-        "prediagn" in name_str
+        "prediagnostico" in name_str
     )
 
 
-def list_professionals(only_public: bool = False):
-    profs = list(_read_json().values())
+def list_professionals(only_public: bool = False) -> List[Dict[str, Any]]:
+    profs = list(get_profesionales().values())
     if only_public:
         return [p for p in profs if not _es_interno(p)]
     return profs
 
 
-def get_professional(pid: str):
-    return _read_json().get(pid)
+def get_professional(pid: str) -> Optional[Dict[str, Any]]:
+    return get_profesionales().get(pid)
 
 
-def add_professional(professional: Dict[str, Any]):
-    """Crea profesional y su usuario automáticamente."""
-    with LOCK:
-        data = _read_json()
+def add_professional(professional: Dict[str, Any]) -> Dict[str, Any]:
+    pid = professional.get("id")
+    if not pid:
+        raise ValueError("Falta campo obligatorio: id")
 
-        pid = professional.get("id")
-        if not pid:
-            raise ValueError("Falta campo obligatorio: id")
-        if pid in data:
-            raise ValueError("Profesional ya existe")
+    if get_professional(pid):
+        raise ValueError("Profesional ya existe")
 
-        data[pid] = professional
-        _write_json(data)
+    save_profesional(pid, professional)
 
-        # Crear usuario automáticamente
-        users    = _read_users()
-        username = professional.get("username") or pid
+    # Crear usuario automáticamente
+    users    = get_users()
+    username = professional.get("username") or pid
 
-        if username not in users:
-            role = professional.get("role", "medico")
-            users[username] = {
-                "password":     professional.get("password", "cambiar123"),
-                "role": {
-                    "name":  role,
-                    "entry": f"/{role}",
-                    "allow": ["agenda", "pacientes", "atencion", "documentos"]
-                },
-                "professional": pid,
-                "active":       True
-            }
-            _write_users(users)
+    if username not in users:
+        role = professional.get("role", "medico")
+        save_user(username, {
+            "password":     professional.get("password", "cambiar123"),
+            "role": {
+                "name":  role,
+                "entry": f"/{role}",
+                "allow": ["agenda", "pacientes", "atencion", "documentos"]
+            },
+            "professional": pid,
+            "active":       True
+        })
 
     return professional
 
 
-def update_professional(pid: str, updates: Dict[str, Any]):
-    with LOCK:
-        data = _read_json()
-        if pid not in data:
-            raise ValueError("Profesional no existe")
-        data[pid].update(updates)
-        _write_json(data)
-        return data[pid]
+def update_professional(pid: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+    prof = get_professional(pid)
+    if not prof:
+        raise ValueError("Profesional no existe")
+    prof.update(updates)
+    save_profesional(pid, prof)
+    return prof
 
 
-def delete_professional(pid: str):
-    """
-    Elimina profesional de:
-    - professionals.json
-    - users.json (usuario asociado)
-    - sedes.json
-    """
-    with LOCK:
-        # 1. Eliminar de professionals.json
-        data = _read_json()
-        if pid not in data:
-            raise ValueError("Profesional no existe")
+def delete_professional(pid: str) -> Dict[str, Any]:
+    prof = get_professional(pid)
+    if not prof:
+        raise ValueError("Profesional no existe")
 
-        removed  = data.pop(pid)
-        username = removed.get("username") or pid
-        _write_json(data)
+    username = prof.get("username") or pid
 
-        # 2. Eliminar usuario asociado de users.json
-        users = _read_users()
-        if username in users:
-            del users[username]
-            _write_users(users)
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            # Eliminar profesional
+            cur.execute("DELETE FROM profesionales WHERE id = %s", (pid,))
+            # Eliminar usuario asociado
+            cur.execute("DELETE FROM usuarios WHERE id = %s", (username,))
+            # Eliminar sede
+            cur.execute("DELETE FROM sedes WHERE id = %s", (pid,))
+            conn.commit()
 
-        # 3. Eliminar sedes
-        sedes = _read_sedes()
-        if pid in sedes:
-            del sedes[pid]
-            _write_sedes(sedes)
-
-    return removed
-    
+    return prof
