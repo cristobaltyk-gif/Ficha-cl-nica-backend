@@ -12,7 +12,13 @@ init_disk_data()
 # SCHEDULER
 # ==========================
 from modules.pagos.scheduler import start_scheduler
-start_scheduler()
+scheduler = start_scheduler()
+
+# ==========================
+# BACKUP DIARIO → R2
+# ==========================
+from services.backup_service import register_backup_scheduler
+register_backup_scheduler(scheduler)
 
 # ==========================
 # Routers
@@ -117,5 +123,4 @@ def root():
         "status":  "ok",
         "service": "Ficha Clínica Backend",
         "modules": ["auth", "professionals", "agenda", "caja", "contable", "pagos"]
-                    }
-    
+    }
