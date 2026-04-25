@@ -53,7 +53,7 @@ def _map_directory(directory: Path) -> Dict[str, Any]:
             result[item.name] = _analyze_json(item)
         elif item.is_dir():
             subdirs = [x for x in item.iterdir() if x.is_dir()]
-            files = [x for x in item.iterdir() if x.is_file()]
+            files   = [x for x in item.iterdir() if x.is_file()]
             if len(subdirs) > 5:
                 sample = subdirs[0]
                 result[item.name] = {
@@ -87,4 +87,42 @@ def list_all_json_files():
         total += size
         files.append({"path": str(f.relative_to(DATA_DIR)), "size": _sizeof_fmt(size)})
     return {"total_files": len(files), "total_size": _sizeof_fmt(total), "files": files}
-     
+
+
+# ══════════════════════════════════════════════════════
+# MIGRACIÓN — leer JSON del disco e importar a PostgreSQL
+# ══════════════════════════════════════════════════════
+
+@router.post("/migrate")
+def migrate_all():
+    """
+    Lee users.json y professionals.json del disco
+    y los importa a PostgreSQL. Ejecutar una sola vez.
+    """
+    from db.supabase_client import save_user, save_profesional
+
+    results = {"usuarios": 0, "profesionales": 0, "errores": []}
+
+    # Migrar usuarios
+    users_file = DATA_DIR / "users.json"
+    if users_file.exists():
+        users = json.loads(users_file.read_text(encoding="utf-8"))
+        for uid, data in users.items():
+            try:
+                save_user(uid, data)
+                results["usuarios"] += 1
+            except Exception as e:
+                results["errores"].append(f"usuario {uid}: {str(e)}")
+
+    # Migrar profesionales
+    profs_file = DATA_DIR / "professionals.json"
+    if profs_file.exists():
+        profs = json.loads(profs_file.read_text(encoding="utf-8"))
+        for pid, data in profs.items():
+            try:
+                save_profesional(pid, data)
+                results["profesionales"] += 1
+            except Exception as e:
+                results["errores"].append(f"profesional {pid}: {str(e)}")
+
+    return results
