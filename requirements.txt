@@ -60,3 +60,8 @@ resend
 # Form parsing (Flow webhooks)
 # =========================
 python-multipart
+
+# =========================
+# Backup → Cloudflare R2
+# =========================
+boto3
