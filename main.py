@@ -9,6 +9,12 @@ from init_data import init_disk_data
 init_disk_data()
 
 # ==========================
+# INICIALIZACIÓN BASE DE DATOS
+# ==========================
+from db.supabase_client import init_db
+init_db()
+
+# ==========================
 # SCHEDULER
 # ==========================
 from modules.pagos.scheduler import start_scheduler
@@ -126,4 +132,3 @@ def root():
         "service": "Ficha Clínica Backend",
         "modules": ["auth", "professionals", "agenda", "caja", "contable", "pagos"]
     }
-    
