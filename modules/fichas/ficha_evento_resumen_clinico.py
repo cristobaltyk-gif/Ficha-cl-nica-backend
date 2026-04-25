@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from typing import List, Dict, Any, Optional
 
 import anthropic
@@ -9,13 +7,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 
 from auth.internal_auth import require_internal_auth
-
-
-# ===============================
-# CONFIG
-# ===============================
-
-BASE_DATA_PATH = Path("/data/pacientes")
+from db.supabase_client import get_paciente, get_eventos
 
 router = APIRouter(
     prefix="/api/fichas/resumen-clinico",
@@ -56,21 +48,9 @@ HISTORIAL:
 """
 
 
-# ===============================
-# SCHEMAS
-# ===============================
-
 class ResumenRequest(BaseModel):
-    # IDs de eventos seleccionados (fecha_hora). Si vacío, usa todos.
     eventos_seleccionados: Optional[List[str]] = None
 
-
-# ===============================
-# HELPERS
-# ===============================
-
-def patient_dir(rut: str) -> Path:
-    return BASE_DATA_PATH / rut
 
 def _build_historial(eventos: List[Dict[str, Any]]) -> str:
     historial = ""
@@ -100,40 +80,26 @@ Plan:
     return historial
 
 
-# ===============================
-# GET — lista de eventos del paciente
-# ===============================
-
 @router.get("/{rut}/eventos")
 def listar_eventos(rut: str, user=Depends(require_internal_auth)):
-    pdir = patient_dir(rut)
-    if not pdir.exists():
+    if not get_paciente(rut):
         raise HTTPException(status_code=404, detail="Ficha no encontrada")
 
-    events_dir = pdir / "eventos"
-    if not events_dir.exists():
-        return {"rut": rut, "eventos": []}
-
-    eventos = []
-    for file in sorted(events_dir.glob("*.json"), reverse=True):
-        try:
-            ev = json.loads(file.read_text(encoding="utf-8"))
-            eventos.append({
+    eventos = get_eventos(rut)
+    return {
+        "rut": rut,
+        "eventos": [
+            {
                 "id":               f"{ev.get('fecha', '')}_{ev.get('hora', '')}",
                 "fecha":            ev.get("fecha", ""),
                 "hora":             ev.get("hora", ""),
                 "diagnostico":      ev.get("diagnostico", "Sin diagnóstico"),
                 "professional_name": ev.get("professional_name", ""),
-            })
-        except Exception:
-            continue
+            }
+            for ev in eventos
+        ]
+    }
 
-    return {"rut": rut, "eventos": eventos}
-
-
-# ===============================
-# POST — generar resumen
-# ===============================
 
 @router.post("/{rut}")
 def generar_resumen_clinico(
@@ -141,26 +107,13 @@ def generar_resumen_clinico(
     body: ResumenRequest = ResumenRequest(),
     user=Depends(require_internal_auth)
 ):
-    pdir = patient_dir(rut)
-    if not pdir.exists():
+    if not get_paciente(rut):
         raise HTTPException(status_code=404, detail="Ficha no encontrada")
 
-    events_dir = pdir / "eventos"
-    if not events_dir.exists():
-        return {"rut": rut, "resumen": "Paciente sin atenciones registradas."}
-
-    todos_eventos = []
-    for file in sorted(events_dir.glob("*.json")):
-        try:
-            ev = json.loads(file.read_text(encoding="utf-8"))
-            todos_eventos.append(ev)
-        except Exception:
-            continue
-
+    todos_eventos = get_eventos(rut)
     if not todos_eventos:
         return {"rut": rut, "resumen": "Paciente sin atenciones registradas."}
 
-    # Filtrar si hay selección
     if body.eventos_seleccionados:
         seleccionados = set(body.eventos_seleccionados)
         eventos = [
@@ -182,8 +135,6 @@ def generar_resumen_clinico(
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": USER_TEMPLATE.format(historial=historial)}]
         )
-        resumen = message.content[0].text.strip()
-        return {"rut": rut, "resumen": resumen}
-
+        return {"rut": rut, "resumen": message.content[0].text.strip()}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error Claude: {str(e)}")
