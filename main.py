@@ -12,13 +12,13 @@ init_disk_data()
 # SCHEDULER
 # ==========================
 from modules.pagos.scheduler import start_scheduler
-scheduler = start_scheduler()
+start_scheduler()
 
 # ==========================
 # BACKUP DIARIO → R2
 # ==========================
-from services.backup_service import register_backup_scheduler
-register_backup_scheduler(scheduler)
+from services.backup_service import start_backup_scheduler
+start_backup_scheduler()
 
 # ==========================
 # Routers
@@ -49,13 +49,13 @@ from modules.control.control_gratuito_router        import router as control_gra
 from modules.contable.gastos_router                 import router as gastos_router
 from modules.contable.contable_router               import router as contable_router
 from modules.pagos.confirmacion_router              import router as confirmacion_router
-from modules.rrhh.router import router as rrhh_router
-from modules.fichas.prediagnostico_ia_router import router as prediag_ia_router
-from core.sedes_router import router as sedes_router
-from core.geo_router import router as geo_router
-from modules.control.control_sobrecupo_router import router as sobrecupo_router
-from modules.caja.caja_config_router import router as caja_config_router
-from admin.data_map_router import router as data_map_router
+from modules.rrhh.router                            import router as rrhh_router
+from modules.fichas.prediagnostico_ia_router        import router as prediag_ia_router
+from core.sedes_router                              import router as sedes_router
+from core.geo_router                                import router as geo_router
+from modules.control.control_sobrecupo_router       import router as sobrecupo_router
+from modules.caja.caja_config_router                import router as caja_config_router
+from admin.data_map_router                          import router as data_map_router
 
 # ==========================
 # APP CORE
