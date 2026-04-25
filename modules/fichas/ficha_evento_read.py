@@ -1,105 +1,52 @@
 from __future__ import annotations
 
-import json
-from pathlib import Path
-from typing import List, Dict, Any
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Depends
-
 from auth.internal_auth import require_internal_auth
-from core.professionals_store import list_professionals
-
-
-# ===============================
-# CONFIG
-# ===============================
-
-BASE_DATA_PATH = Path("/data/pacientes")
+from modules.fichas.ficha_evento_schema import FichaEventoCreate
+from agenda.store import set_slot
+from db.supabase_client import get_paciente, create_evento
 
 router = APIRouter(
     prefix="/api/fichas/evento",
-    tags=["Ficha Clínica - Read"],
+    tags=["Ficha Clínica - Evento"],
     dependencies=[Depends(require_internal_auth)]
 )
 
 
-# ===============================
-# HELPERS
-# ===============================
-
-def patient_dir(rut: str) -> Path:
-    return BASE_DATA_PATH / rut
+def chile_now() -> str:
+    return datetime.now(ZoneInfo("America/Santiago")).isoformat()
 
 
-# ===============================
-# LEER HISTORIAL COMPLETO
-# ===============================
-
-@router.get("/{rut}")
-def get_clinical_events(
-    rut: str,
+@router.post("")
+def save_clinical_event(
+    data: FichaEventoCreate,
     user=Depends(require_internal_auth)
-) -> List[Dict[str, Any]]:
-    """
-    Devuelve todos los eventos clínicos del paciente,
-    ordenados por fecha/hora descendente.
+):
+    rut = data.rut
 
-    - Respeta auth interno
-    - Resuelve professional_name desde professionals_store
-    - NO usa USERS
-    """
+    if not get_paciente(rut):
+        raise HTTPException(status_code=404, detail="La ficha del paciente no existe")
 
-    # ===============================
-    # VALIDAR ROL CLÍNICO
-    # ===============================
-    role = user.get("role", {})
-    if role.get("name") not in ["medico", "kinesiologia"]:
-        raise HTTPException(
-            status_code=403,
-            detail="No autorizado para leer ficha clínica"
-        )
+    evento = data.dict()
+    evento["professional_id"]   = user["professional"]
+    evento["professional_user"] = user["usuario"]
+    evento["professional_role"] = user["role"]
+    evento["created_at"]        = chile_now()
 
-    pdir = patient_dir(rut)
+    try:
+        create_evento(rut, evento)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
 
-    if not pdir.exists():
-        raise HTTPException(
-            status_code=404,
-            detail="La ficha del paciente no existe"
-        )
+    set_slot(
+        date=data.fecha,
+        time=data.hora,
+        professional=user["usuario"],
+        status="evaluated",
+        rut=rut
+    )
 
-    events_dir = pdir / "eventos"
-
-    if not events_dir.exists():
-        return []
-
-    # ===============================
-    # CARGAR PROFESIONALES (FUENTE CLÍNICA)
-    # ===============================
-    professionals_list = list_professionals()
-    professionals_map = {p["id"]: p for p in professionals_list}
-
-    eventos = []
-
-    for file in sorted(events_dir.glob("*.json"), reverse=True):
-        try:
-            contenido = json.loads(file.read_text(encoding="utf-8"))
-
-            # ===============================
-            # Resolver nombre profesional
-            # ===============================
-            professional_id = contenido.get("professional_id")
-
-            if professional_id and professional_id in professionals_map:
-                contenido["professional_name"] = (
-                    professionals_map[professional_id]["name"]
-                )
-            else:
-                # Fallback seguro
-                contenido["professional_name"] = professional_id or ""
-
-            eventos.append(contenido)
-
-        except Exception:
-            continue
-
-    return eventos
+    return {"status": "ok", "rut": rut}
