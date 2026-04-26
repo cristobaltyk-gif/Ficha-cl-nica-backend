@@ -1,460 +1,292 @@
-"""
-db/supabase_client.py
-"""
 from __future__ import annotations
 
-import os
 import json
-import psycopg2
-import psycopg2.extras
-from typing import Any, Dict, List, Optional
-from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict
+
+from fastapi import APIRouter
+
+router = APIRouter(prefix="/admin", tags=["Admin"])
+DATA_DIR = Path("/data")
 
 
-def _get_conn():
-    url = os.environ.get("SUPABASE_DATABASE_URL")
-    if not url:
-        raise RuntimeError("Falta variable de entorno SUPABASE_DATABASE_URL")
-    return psycopg2.connect(url, cursor_factory=psycopg2.extras.RealDictCursor)
+def _sizeof_fmt(num_bytes: int) -> str:
+    for unit in ["B", "KB", "MB", "GB"]:
+        if num_bytes < 1024:
+            return f"{num_bytes:.1f} {unit}"
+        num_bytes /= 1024
+    return f"{num_bytes:.1f} TB"
 
 
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+def _sample_keys(obj: Any, max_depth: int = 2) -> Any:
+    if max_depth == 0:
+        return "..."
+    if isinstance(obj, dict):
+        return {k: _sample_keys(v, max_depth - 1) for k, v in list(obj.items())[:5]}
+    if isinstance(obj, list):
+        if not obj:
+            return []
+        return [_sample_keys(obj[0], max_depth - 1), f"... ({len(obj)} items)"]
+    return type(obj).__name__
 
 
-def init_db():
-    sql = (
-        "CREATE TABLE IF NOT EXISTS usuarios ("
-        "id TEXT PRIMARY KEY, password TEXT DEFAULT '', active BOOLEAN DEFAULT TRUE, "
-        "professional TEXT, role JSONB, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW());"
+def _analyze_json(path: Path) -> Dict[str, Any]:
+    try:
+        size = path.stat().st_size
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return {"size": _sizeof_fmt(size), "type": "object", "count": len(data), "structure": _sample_keys(data)}
+        if isinstance(data, list):
+            return {"size": _sizeof_fmt(size), "type": "array", "count": len(data), "structure": _sample_keys(data)}
+        return {"size": _sizeof_fmt(size), "type": "scalar", "count": 1}
+    except Exception as e:
+        return {"size": "?", "type": "error", "count": 0, "error": str(e)}
 
-        "CREATE TABLE IF NOT EXISTS profesionales ("
-        "id TEXT PRIMARY KEY, name TEXT NOT NULL, rut TEXT, specialty TEXT, active BOOLEAN DEFAULT TRUE, "
-        "schedule JSONB, blocked_dates TEXT[], created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW());"
 
-        "CREATE TABLE IF NOT EXISTS pacientes ("
-        "rut TEXT PRIMARY KEY, nombre TEXT, apellido_paterno TEXT, apellido_materno TEXT, "
-        "fecha_nacimiento TEXT, sexo TEXT, email TEXT, telefono TEXT, direccion TEXT, ciudad TEXT, "
-        "prevision TEXT, ocupacion TEXT, extra JSONB, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW());"
+def _map_directory(directory: Path) -> Dict[str, Any]:
+    result = {}
+    if not directory.exists():
+        return {"error": f"{directory} no existe"}
+    for item in sorted(directory.iterdir()):
+        if item.is_file() and item.suffix == ".json":
+            result[item.name] = _analyze_json(item)
+        elif item.is_dir():
+            subdirs = [x for x in item.iterdir() if x.is_dir()]
+            files   = [x for x in item.iterdir() if x.is_file()]
+            if len(subdirs) > 5:
+                sample = subdirs[0]
+                result[item.name] = {
+                    "type": "directory_records",
+                    "total_records": len(subdirs),
+                    "direct_files": [f.name for f in files],
+                    "sample_record": sample.name,
+                    "sample_structure": {
+                        f.name: _analyze_json(f)
+                        for f in sorted(sample.iterdir())[:5]
+                        if f.suffix == ".json"
+                    },
+                }
+            else:
+                result[item.name] = _map_directory(item)
+    return result
 
-        "CREATE TABLE IF NOT EXISTS eventos ("
-        "id SERIAL PRIMARY KEY, rut_paciente TEXT NOT NULL REFERENCES pacientes(rut), "
-        "professional_id TEXT REFERENCES profesionales(id), fecha_hora TEXT NOT NULL, tipo TEXT, "
-        "contenido JSONB NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW());"
 
-        "CREATE INDEX IF NOT EXISTS idx_eventos_rut ON eventos(rut_paciente);"
-        "CREATE INDEX IF NOT EXISTS idx_eventos_fecha ON eventos(fecha_hora);"
+@router.get("/data-map")
+def get_data_map():
+    mapped = _map_directory(DATA_DIR)
+    return {"data_dir": str(DATA_DIR), "structure": mapped}
 
-        "CREATE TABLE IF NOT EXISTS sedes ("
-        "id TEXT PRIMARY KEY, regiones JSONB, created_at TIMESTAMPTZ DEFAULT NOW());"
 
-        "CREATE TABLE IF NOT EXISTS trabajadores ("
-        "id SERIAL PRIMARY KEY, data JSONB NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW());"
+@router.get("/data-map/files")
+def list_all_json_files():
+    files = []
+    total = 0
+    for f in sorted(DATA_DIR.rglob("*.json")):
+        size = f.stat().st_size
+        total += size
+        files.append({"path": str(f.relative_to(DATA_DIR)), "size": _sizeof_fmt(size)})
+    return {"total_files": len(files), "total_size": _sizeof_fmt(total), "files": files}
 
-        "CREATE TABLE IF NOT EXISTS gastos ("
-        "id SERIAL PRIMARY KEY, periodo TEXT NOT NULL, data JSONB NOT NULL, "
-        "created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW());"
 
-        "CREATE TABLE IF NOT EXISTS comisiones ("
-        "id SERIAL PRIMARY KEY, data JSONB NOT NULL, updated_at TIMESTAMPTZ DEFAULT NOW());"
-
-        "CREATE TABLE IF NOT EXISTS slots ("
-        "id SERIAL PRIMARY KEY, date TEXT NOT NULL, time TEXT NOT NULL, professional TEXT NOT NULL, "
-        "status TEXT NOT NULL DEFAULT 'reserved', rut TEXT, extra JSONB DEFAULT '{}', "
-        "updated_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE (date, time, professional));"
-
-        "CREATE INDEX IF NOT EXISTS idx_slots_date ON slots(date);"
-        "CREATE INDEX IF NOT EXISTS idx_slots_professional ON slots(professional);"
-        "CREATE INDEX IF NOT EXISTS idx_slots_date_prof ON slots(date, professional);"
+@router.post("/migrate")
+def migrate_all():
+    """Migra todos los datos desde /data a PostgreSQL. Idempotente."""
+    from db.supabase_client import (
+        _get_conn, save_user, save_profesional, create_paciente, create_evento,
+        get_paciente, save_caja_slot, save_pago, save_comisiones, save_caja_config,
+        save_gastos, save_gastos_config, save_trabajadores, save_tasas
     )
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(sql)
-            conn.commit()
-    print("✅ [DB] Tablas verificadas/creadas correctamente")
 
+    results = {
+        "usuarios": 0, "profesionales": 0, "pacientes": 0, "eventos": 0,
+        "sedes": 0, "slots": 0, "caja": 0, "pagos": 0,
+        "config": 0, "errores": []
+    }
 
-def get_paciente(rut: str) -> Optional[Dict[str, Any]]:
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT * FROM pacientes WHERE rut = %s", (rut,))
-            row = cur.fetchone()
-            return dict(row) if row else None
+    # Fix password column
+    try:
+        with _get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("ALTER TABLE usuarios ALTER COLUMN password DROP NOT NULL")
+                cur.execute("ALTER TABLE usuarios ALTER COLUMN password SET DEFAULT ''")
+                conn.commit()
+    except Exception:
+        pass
 
+    # Usuarios
+    f = DATA_DIR / "users.json"
+    if f.exists():
+        for uid, data in json.loads(f.read_text(encoding="utf-8")).items():
+            try:
+                save_user(uid, data); results["usuarios"] += 1
+            except Exception as e:
+                results["errores"].append(f"usuario {uid}: {e}")
 
-def create_paciente(data: Dict[str, Any]) -> Dict[str, Any]:
-    now = _utc_now()
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO pacientes (
-                    rut, nombre, apellido_paterno, apellido_materno,
-                    fecha_nacimiento, sexo, email, telefono,
-                    direccion, ciudad, prevision, ocupacion,
-                    extra, created_at, updated_at
-                ) VALUES (
-                    %(rut)s, %(nombre)s, %(apellido_paterno)s, %(apellido_materno)s,
-                    %(fecha_nacimiento)s, %(sexo)s, %(email)s, %(telefono)s,
-                    %(direccion)s, %(ciudad)s, %(prevision)s, %(ocupacion)s,
-                    %(extra)s, %(created_at)s, %(updated_at)s
-                ) RETURNING *
-            """, {
-                "rut": data["rut"], "nombre": data.get("nombre", ""),
-                "apellido_paterno": data.get("apellido_paterno", ""),
-                "apellido_materno": data.get("apellido_materno", ""),
-                "fecha_nacimiento": data.get("fecha_nacimiento", ""),
-                "sexo": data.get("sexo", ""), "email": data.get("email", ""),
-                "telefono": data.get("telefono", ""), "direccion": data.get("direccion", ""),
-                "ciudad": data.get("ciudad", ""), "prevision": data.get("prevision", ""),
-                "ocupacion": data.get("ocupacion", ""),
-                "extra": json.dumps(data.get("extra", {})),
-                "created_at": now, "updated_at": now,
-            })
-            conn.commit()
-            return dict(cur.fetchone())
+    # Profesionales
+    f = DATA_DIR / "professionals.json"
+    if f.exists():
+        for pid, data in json.loads(f.read_text(encoding="utf-8")).items():
+            try:
+                save_profesional(pid, data); results["profesionales"] += 1
+            except Exception as e:
+                results["errores"].append(f"profesional {pid}: {e}")
 
+    # Sedes
+    f = DATA_DIR / "sedes.json"
+    if f.exists():
+        sedes = json.loads(f.read_text(encoding="utf-8"))
+        with _get_conn() as conn:
+            with conn.cursor() as cur:
+                for pid, data in sedes.items():
+                    try:
+                        cur.execute("""
+                            INSERT INTO sedes (id, regiones, created_at) VALUES (%s, %s, NOW())
+                            ON CONFLICT (id) DO UPDATE SET regiones = EXCLUDED.regiones
+                        """, (pid, json.dumps(data.get("regiones", {}))))
+                        results["sedes"] += 1
+                    except Exception as e:
+                        results["errores"].append(f"sede {pid}: {e}")
+                conn.commit()
 
-def update_paciente(rut: str, data: Dict[str, Any]) -> Dict[str, Any]:
-    now = _utc_now()
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                UPDATE pacientes SET
-                    nombre=%(nombre)s, apellido_paterno=%(apellido_paterno)s,
-                    apellido_materno=%(apellido_materno)s, fecha_nacimiento=%(fecha_nacimiento)s,
-                    sexo=%(sexo)s, email=%(email)s, telefono=%(telefono)s,
-                    direccion=%(direccion)s, ciudad=%(ciudad)s, prevision=%(prevision)s,
-                    ocupacion=%(ocupacion)s, extra=%(extra)s, updated_at=%(updated_at)s
-                WHERE rut=%(rut)s RETURNING *
-            """, {
-                "rut": rut, "nombre": data.get("nombre", ""),
-                "apellido_paterno": data.get("apellido_paterno", ""),
-                "apellido_materno": data.get("apellido_materno", ""),
-                "fecha_nacimiento": data.get("fecha_nacimiento", ""),
-                "sexo": data.get("sexo", ""), "email": data.get("email", ""),
-                "telefono": data.get("telefono", ""), "direccion": data.get("direccion", ""),
-                "ciudad": data.get("ciudad", ""), "prevision": data.get("prevision", ""),
-                "ocupacion": data.get("ocupacion", ""),
-                "extra": json.dumps(data.get("extra", {})), "updated_at": now,
-            })
-            conn.commit()
-            return dict(cur.fetchone())
+    # Pacientes y eventos
+    pacientes_dir = DATA_DIR / "pacientes"
+    if pacientes_dir.exists():
+        for pdir in sorted(pacientes_dir.iterdir()):
+            if not pdir.is_dir():
+                continue
+            rut = pdir.name
+            af = pdir / "admin.json"
+            if af.exists():
+                try:
+                    data = json.loads(af.read_text(encoding="utf-8"))
+                    if not get_paciente(rut):
+                        create_paciente(data)
+                    results["pacientes"] += 1
+                except Exception as e:
+                    results["errores"].append(f"paciente {rut}: {e}"); continue
+            eventos_dir = pdir / "eventos"
+            if eventos_dir.exists():
+                for ev_file in sorted(eventos_dir.glob("*.json")):
+                    try:
+                        create_evento(rut, json.loads(ev_file.read_text(encoding="utf-8")))
+                        results["eventos"] += 1
+                    except ValueError:
+                        pass
+                    except Exception as e:
+                        results["errores"].append(f"evento {rut}/{ev_file.name}: {e}")
 
+    # Slots agenda
+    f = DATA_DIR / "agenda_future.json"
+    if f.exists():
+        try:
+            calendar = json.loads(f.read_text(encoding="utf-8")).get("calendar", {})
+            with _get_conn() as conn:
+                with conn.cursor() as cur:
+                    for date, day_data in calendar.items():
+                        for prof, prof_data in day_data.items():
+                            for time, slot in prof_data.get("slots", {}).items():
+                                try:
+                                    cur.execute("""
+                                        INSERT INTO slots (date, time, professional, status, rut, extra, updated_at)
+                                        VALUES (%s,%s,%s,%s,%s,%s,NOW())
+                                        ON CONFLICT (date, time, professional) DO NOTHING
+                                    """, (date, time, prof, slot.get("status","reserved"), slot.get("rut"),
+                                          json.dumps({k:v for k,v in slot.items() if k not in ("status","rut")})))
+                                    results["slots"] += 1
+                                except Exception as e:
+                                    results["errores"].append(f"slot {date} {time} {prof}: {e}")
+                    conn.commit()
+        except Exception as e:
+            results["errores"].append(f"agenda: {e}")
 
-def search_pacientes(q: str) -> List[Dict[str, Any]]:
-    q_lower = f"%{q.lower()}%"
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT * FROM pacientes
-                WHERE LOWER(rut) LIKE %(q)s OR LOWER(nombre) LIKE %(q)s
-                   OR LOWER(apellido_paterno) LIKE %(q)s OR LOWER(apellido_materno) LIKE %(q)s
-                ORDER BY apellido_paterno, nombre LIMIT 50
-            """, {"q": q_lower})
-            return [dict(r) for r in cur.fetchall()]
+    # Caja
+    caja_dir = DATA_DIR / "caja"
+    if caja_dir.exists():
+        for f in sorted(caja_dir.glob("*.json")):
+            try:
+                data = json.loads(f.read_text(encoding="utf-8"))
+                for date, profs in data.items():
+                    for prof, slots in profs.items():
+                        for time, slot in slots.items():
+                            try:
+                                save_caja_slot(date, prof, time, slot)
+                                results["caja"] += 1
+                            except Exception as e:
+                                results["errores"].append(f"caja {date} {prof} {time}: {e}")
+            except Exception as e:
+                results["errores"].append(f"caja file {f.name}: {e}")
 
+    # Pagos
+    pagos_dir = DATA_DIR / "pagos"
+    if pagos_dir.exists():
+        for f in sorted(pagos_dir.glob("*.json")):
+            try:
+                data = json.loads(f.read_text(encoding="utf-8"))
+                for date, profs in data.items():
+                    for prof, slots in profs.items():
+                        for time, pago in slots.items():
+                            try:
+                                save_pago(date, prof, time, pago)
+                                results["pagos"] += 1
+                            except Exception as e:
+                                results["errores"].append(f"pago {date} {prof} {time}: {e}")
+            except Exception as e:
+                results["errores"].append(f"pagos file {f.name}: {e}")
 
-def get_eventos(rut: str) -> List[Dict[str, Any]]:
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT * FROM eventos WHERE rut_paciente = %s ORDER BY fecha_hora DESC", (rut,))
-            rows = cur.fetchall()
-            result = []
-            for row in rows:
-                ev = dict(row["contenido"])
-                ev["_id"] = row["id"]
-                ev["created_at"] = str(row["created_at"])
-                result.append(ev)
-            return result
+    # Comisiones
+    f = DATA_DIR / "comisiones.json"
+    if f.exists():
+        try:
+            save_comisiones(json.loads(f.read_text(encoding="utf-8")))
+            results["config"] += 1
+        except Exception as e:
+            results["errores"].append(f"comisiones: {e}")
 
+    # Caja config
+    f = DATA_DIR / "caja_config.json"
+    if f.exists():
+        try:
+            save_caja_config(json.loads(f.read_text(encoding="utf-8")))
+            results["config"] += 1
+        except Exception as e:
+            results["errores"].append(f"caja_config: {e}")
 
-def get_eventos_resumen(rut: str) -> List[Dict[str, Any]]:
-    return [{
-        "fecha": ev.get("fecha"), "hora": ev.get("hora"),
-        "diagnostico": ev.get("diagnostico"),
-        "professional_name": ev.get("professional_name") or ev.get("professional_user") or ev.get("professional_id") or "",
-        "created_at": ev.get("created_at"),
-    } for ev in get_eventos(rut)]
+    # Gastos
+    f = DATA_DIR / "gastos.json"
+    if f.exists():
+        try:
+            save_gastos(json.loads(f.read_text(encoding="utf-8")))
+            results["config"] += 1
+        except Exception as e:
+            results["errores"].append(f"gastos: {e}")
 
+    # Gastos config
+    f = DATA_DIR / "gastos_config.json"
+    if f.exists():
+        try:
+            save_gastos_config(json.loads(f.read_text(encoding="utf-8")))
+            results["config"] += 1
+        except Exception as e:
+            results["errores"].append(f"gastos_config: {e}")
 
-def create_evento(rut: str, evento: Dict[str, Any]) -> Dict[str, Any]:
-    fecha_hora = f"{evento.get('fecha', '')}_{evento.get('hora', '').replace(':', '-')}"
-    now = _utc_now()
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT id FROM eventos WHERE rut_paciente = %s AND fecha_hora = %s", (rut, fecha_hora))
-            if cur.fetchone():
-                raise ValueError("Ya existe una atención en esa fecha y hora")
-            cur.execute("""
-                INSERT INTO eventos (rut_paciente, professional_id, fecha_hora, tipo, contenido, created_at, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id
-            """, (rut, evento.get("professional_id"), fecha_hora,
-                  evento.get("tipo", "consulta"), json.dumps(evento), now, now))
-            conn.commit()
-            evento["_id"] = cur.fetchone()["id"]
-            return evento
-def get_users() -> Dict[str, Any]:
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT * FROM usuarios")
-            rows = cur.fetchall()
-            return {
-                row["id"]: {
-                    "password": row["password"], "active": row["active"],
-                    "professional": row["professional"], "role": row["role"],
-                } for row in rows
-            }
+    # RRHH trabajadores
+    f = DATA_DIR / "rrhh" / "trabajadores.json"
+    if f.exists():
+        try:
+            save_trabajadores(json.loads(f.read_text(encoding="utf-8")))
+            results["config"] += 1
+        except Exception as e:
+            results["errores"].append(f"trabajadores: {e}")
 
+    # RRHH tasas
+    f = DATA_DIR / "rrhh" / "tasas.json"
+    if f.exists():
+        try:
+            save_tasas(json.loads(f.read_text(encoding="utf-8")))
+            results["config"] += 1
+        except Exception as e:
+            results["errores"].append(f"tasas: {e}")
 
-def save_user(user_id: str, data: Dict[str, Any]) -> None:
-    now = _utc_now()
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO usuarios (id, password, active, professional, role, created_at, updated_at)
-                VALUES (%(id)s, %(password)s, %(active)s, %(professional)s, %(role)s, %(now)s, %(now)s)
-                ON CONFLICT (id) DO UPDATE SET
-                    password=EXCLUDED.password, active=EXCLUDED.active,
-                    professional=EXCLUDED.professional, role=EXCLUDED.role, updated_at=EXCLUDED.updated_at
-            """, {
-                "id": user_id, "password": data.get("password", ""),
-                "active": data.get("active", True), "professional": data.get("professional"),
-                "role": json.dumps(data.get("role", {})), "now": now,
-            })
-            conn.commit()
-
-
-def save_users(users: Dict[str, Any]) -> None:
-    for user_id, data in users.items():
-        save_user(user_id, data)
-
-
-def load_users() -> Dict[str, Any]:
-    return get_users()
-
-
-def get_profesionales() -> Dict[str, Any]:
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT * FROM profesionales WHERE active = TRUE AND schedule IS NOT NULL")
-            rows = cur.fetchall()
-            return {
-                row["id"]: {
-                    "id": row["id"], "name": row["name"], "rut": row["rut"],
-                    "specialty": row["specialty"], "active": row["active"],
-                    "schedule": row["schedule"], "blocked_dates": row["blocked_dates"] or [],
-                } for row in rows
-            }
-
-
-def save_profesional(prof_id: str, data: Dict[str, Any]) -> None:
-    now = _utc_now()
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO profesionales (id, name, rut, specialty, active, schedule, blocked_dates, created_at, updated_at)
-                VALUES (%(id)s, %(name)s, %(rut)s, %(specialty)s, %(active)s, %(schedule)s, %(blocked_dates)s, %(now)s, %(now)s)
-                ON CONFLICT (id) DO UPDATE SET
-                    name=EXCLUDED.name, rut=EXCLUDED.rut, specialty=EXCLUDED.specialty,
-                    active=EXCLUDED.active, schedule=EXCLUDED.schedule,
-                    blocked_dates=EXCLUDED.blocked_dates, updated_at=EXCLUDED.updated_at
-            """, {
-                "id": prof_id, "name": data.get("name", ""), "rut": data.get("rut", ""),
-                "specialty": data.get("specialty", ""), "active": data.get("active", True),
-                "schedule": json.dumps(data.get("schedule", {})),
-                "blocked_dates": data.get("blocked_dates", []), "now": now,
-            })
-            conn.commit()
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# CAJA
-# ══════════════════════════════════════════════════════════════════════════════
-
-def get_caja_slot(date: str, professional: str, time: str) -> dict:
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT data FROM caja WHERE date=%s AND professional=%s AND time=%s", (date, professional, time))
-            row = cur.fetchone()
-            return dict(row["data"]) if row else {}
-
-def get_caja_day(date: str, professional: str) -> dict:
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT time, data FROM caja WHERE date=%s AND professional=%s", (date, professional))
-            return {row["time"]: dict(row["data"]) for row in cur.fetchall()}
-
-def save_caja_slot(date: str, professional: str, time: str, slot: dict) -> None:
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO caja (date, professional, time, data, updated_at)
-                VALUES (%s,%s,%s,%s,NOW())
-                ON CONFLICT (date, professional, time) DO UPDATE SET data=EXCLUDED.data, updated_at=NOW()
-            """, (date, professional, time, json.dumps(slot)))
-            conn.commit()
-
-def delete_caja_slot(date: str, professional: str, time: str) -> None:
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("DELETE FROM caja WHERE date=%s AND professional=%s AND time=%s", (date, professional, time))
-            conn.commit()
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# PAGOS
-# ══════════════════════════════════════════════════════════════════════════════
-
-def get_pagos_day(date: str, professional: str) -> dict:
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT time, data FROM pagos WHERE date=%s AND professional=%s", (date, professional))
-            return {row["time"]: dict(row["data"]) for row in cur.fetchall()}
-
-def get_pagos_mes(mes: str) -> list:
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT date, professional, time, data FROM pagos WHERE mes=%s", (mes,))
-            return [{**dict(row["data"]), "fecha": row["date"], "time": row["time"], "professional": row["professional"]} for row in cur.fetchall()]
-
-def save_pago(date: str, professional: str, time: str, pago: dict) -> None:
-    mes = date[:7]
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO pagos (date, mes, professional, time, data, updated_at)
-                VALUES (%s,%s,%s,%s,%s,NOW())
-                ON CONFLICT (date, professional, time) DO UPDATE SET data=EXCLUDED.data, updated_at=NOW()
-            """, (date, mes, professional, time, json.dumps(pago)))
-            conn.commit()
-
-def update_pago(date: str, professional: str, time: str, updates: dict) -> None:
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT data FROM pagos WHERE date=%s AND professional=%s AND time=%s", (date, professional, time))
-            row = cur.fetchone()
-            if not row:
-                return
-            data = dict(row["data"])
-            data.update(updates)
-            cur.execute("UPDATE pagos SET data=%s, updated_at=NOW() WHERE date=%s AND professional=%s AND time=%s",
-                       (json.dumps(data), date, professional, time))
-            conn.commit()
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# COMISIONES
-# ══════════════════════════════════════════════════════════════════════════════
-
-def get_comisiones() -> dict:
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT data FROM config WHERE key='comisiones'")
-            row = cur.fetchone()
-            return dict(row["data"]) if row else {"default": 20}
-
-def save_comisiones(data: dict) -> None:
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO config (key, data, updated_at) VALUES ('comisiones', %s, NOW())
-                ON CONFLICT (key) DO UPDATE SET data=EXCLUDED.data, updated_at=NOW()
-            """, (json.dumps(data),))
-            conn.commit()
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# CAJA CONFIG
-# ══════════════════════════════════════════════════════════════════════════════
-
-def get_caja_config() -> dict:
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT data FROM config WHERE key='caja_config'")
-            row = cur.fetchone()
-            return dict(row["data"]) if row else {}
-
-def save_caja_config(data: dict) -> None:
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO config (key, data, updated_at) VALUES ('caja_config', %s, NOW())
-                ON CONFLICT (key) DO UPDATE SET data=EXCLUDED.data, updated_at=NOW()
-            """, (json.dumps(data),))
-            conn.commit()
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# GASTOS
-# ══════════════════════════════════════════════════════════════════════════════
-
-def get_gastos() -> dict:
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT data FROM config WHERE key='gastos'")
-            row = cur.fetchone()
-            return dict(row["data"]) if row else {}
-
-def save_gastos(data: dict) -> None:
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO config (key, data, updated_at) VALUES ('gastos', %s, NOW())
-                ON CONFLICT (key) DO UPDATE SET data=EXCLUDED.data, updated_at=NOW()
-            """, (json.dumps(data),))
-            conn.commit()
-
-def get_gastos_config() -> dict:
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT data FROM config WHERE key='gastos_config'")
-            row = cur.fetchone()
-            return dict(row["data"]) if row else {}
-
-def save_gastos_config(data: dict) -> None:
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO config (key, data, updated_at) VALUES ('gastos_config', %s, NOW())
-                ON CONFLICT (key) DO UPDATE SET data=EXCLUDED.data, updated_at=NOW()
-            """, (json.dumps(data),))
-            conn.commit()
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# RRHH
-# ══════════════════════════════════════════════════════════════════════════════
-
-def get_trabajadores() -> dict:
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT data FROM config WHERE key='trabajadores'")
-            row = cur.fetchone()
-            return dict(row["data"]) if row else {}
-
-def save_trabajadores(data: dict) -> None:
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO config (key, data, updated_at) VALUES ('trabajadores', %s, NOW())
-                ON CONFLICT (key) DO UPDATE SET data=EXCLUDED.data, updated_at=NOW()
-            """, (json.dumps(data),))
-            conn.commit()
-
-def get_tasas() -> dict:
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT data FROM config WHERE key='tasas'")
-            row = cur.fetchone()
-            return dict(row["data"]) if row else {}
-
-def save_tasas(data: dict) -> None:
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO config (key, data, updated_at) VALUES ('tasas', %s, NOW())
-                ON CONFLICT (key) DO UPDATE SET data=EXCLUDED.data, updated_at=NOW()
-            """, (json.dumps(data),))
-            conn.commit()
-            
-
+    return results
+                                    
