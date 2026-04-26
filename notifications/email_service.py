@@ -283,3 +283,52 @@ def enviar_documentos_atencion(
     except Exception as e:
         print(f"❌ ERROR EMAIL documentos: {e}"); return False
     
+# ======================================================
+# AGREGAR AL FINAL DE notifications/email_service.py
+# ======================================================
+
+def enviar_notificacion_bloqueo(
+    *,
+    email_paciente: str,
+    nombre_paciente: str,
+    fecha: str,
+    hora: str,
+    profesional_nombre: str,
+    motivo: str = "El profesional no estará disponible este día",
+) -> bool:
+    _init()
+
+    html = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; background: #fff;">
+        <img src="{LOGO_URL}" alt="Instituto de Cirugía Articular" style="height: 60px; margin-bottom: 24px;" />
+        <h2 style="color: #0f172a;">Aviso importante sobre su hora médica</h2>
+        <p>Estimado/a <strong>{nombre_paciente}</strong>,</p>
+        <p>Le informamos que su hora médica ha sido <strong>cancelada</strong> por el siguiente motivo:</p>
+        <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 16px; margin: 20px 0;">
+            <p style="margin: 4px 0;"><strong>Fecha:</strong> {fecha}</p>
+            <p style="margin: 4px 0;"><strong>Hora:</strong> {hora}</p>
+            <p style="margin: 4px 0;"><strong>Profesional:</strong> {profesional_nombre}</p>
+            <p style="margin: 12px 0 0; color: #dc2626; font-weight: bold;">⚠️ {motivo}</p>
+        </div>
+        <p>Le pedimos disculpas por los inconvenientes. Para reagendar su hora, contáctenos a:</p>
+        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin: 16px 0;">
+            <p style="margin: 4px 0;">📧 <a href="mailto:contacto@icarticular.cl">contacto@icarticular.cl</a></p>
+            <p style="margin: 4px 0;">🌐 <a href="https://reservas.icarticular.cl">reservas.icarticular.cl</a></p>
+        </div>
+        <p style="color: #64748b; font-size: 12px; margin-top: 24px;">
+            Instituto de Cirugía Articular — Curicó, Chile<br/>contacto@icarticular.cl
+        </p>
+    </div>
+    """
+
+    try:
+        resend.Emails.send({
+            "from": FROM_EMAIL,
+            "to":   [email_paciente],
+            "subject": f"ICA — Cancelación de hora · {fecha} {hora}",
+            "html": html
+        })
+        return True
+    except Exception as e:
+        print(f"❌ ERROR EMAIL bloqueo: {e}"); return False
+    
