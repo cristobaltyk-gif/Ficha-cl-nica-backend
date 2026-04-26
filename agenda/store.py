@@ -132,4 +132,87 @@ def cleanup_past(*, keep_from_date: str) -> None:
                 DELETE FROM slots WHERE date < %s
             """, (keep_from_date,))
             conn.commit()
-            
+
+
+# ══════════════════════════════════════════════════════════════
+# COMPATIBILIDAD — load_store / save_store
+# Mantiene interfaz legacy para control_gratuito y sobrecupo
+# ══════════════════════════════════════════════════════════════
+
+def load_store() -> dict:
+    """
+    Retorna estructura compatible con el código legacy:
+    {
+        "calendar": {
+            "YYYY-MM-DD": {
+                "professional_id": {
+                    "slots": {
+                        "HH:MM": {"status": ..., "rut": ..., ...extra}
+                    }
+                }
+            }
+        },
+        "index_by_time": {}
+    }
+    """
+    import json as _json
+    from db.supabase_client import _get_conn
+
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT date, time, professional, status, rut, extra FROM slots")
+            rows = cur.fetchall()
+
+    calendar = {}
+    for row in rows:
+        date = row["date"]
+        prof = row["professional"]
+        time = row["time"]
+
+        calendar.setdefault(date, {})
+        calendar[date].setdefault(prof, {"schedule": {}, "slots": {}})
+
+        slot = {"status": row["status"]}
+        if row["rut"]:
+            slot["rut"] = row["rut"]
+        if row["extra"]:
+            extra = row["extra"] if isinstance(row["extra"], dict) else _json.loads(row["extra"])
+            slot.update(extra)
+
+        calendar[date][prof]["slots"][time] = slot
+
+    return {
+        "meta":          {"version": 1},
+        "calendar":      calendar,
+        "index_by_time": {}
+    }
+
+
+def save_store(store: dict) -> None:
+    """
+    Persiste todos los slots del store a PostgreSQL.
+    Reemplaza completamente los slots de las fechas presentes.
+    """
+    import json as _json
+    from db.supabase_client import _get_conn
+
+    calendar = store.get("calendar", {})
+
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            for date, day_data in calendar.items():
+                for prof, prof_data in day_data.items():
+                    for time, slot in prof_data.get("slots", {}).items():
+                        status = slot.get("status", "reserved")
+                        rut    = slot.get("rut")
+                        extra  = {k: v for k, v in slot.items() if k not in ("status", "rut")}
+                        cur.execute("""
+                            INSERT INTO slots (date, time, professional, status, rut, extra, updated_at)
+                            VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                            ON CONFLICT (date, time, professional) DO UPDATE SET
+                                status     = EXCLUDED.status,
+                                rut        = EXCLUDED.rut,
+                                extra      = EXCLUDED.extra,
+                                updated_at = EXCLUDED.updated_at
+                        """, (date, time, prof, status, rut, _json.dumps(extra)))
+            conn.commit()
