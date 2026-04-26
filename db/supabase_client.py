@@ -462,4 +462,4 @@ def save_tasas(data: dict) -> None:
                 ON CONFLICT (key) DO UPDATE SET data=EXCLUDED.data, updated_at=NOW()
             """, (json.dumps(data),))
             conn.commit()
-        
+            
