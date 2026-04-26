@@ -70,6 +70,9 @@ def init_db():
         "CREATE TABLE IF NOT EXISTS pagos (id SERIAL PRIMARY KEY, date TEXT NOT NULL, mes TEXT NOT NULL, professional TEXT NOT NULL, time TEXT NOT NULL, data JSONB NOT NULL DEFAULT '{}', updated_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE (date, professional, time));"
         "CREATE INDEX IF NOT EXISTS idx_pagos_mes ON pagos(mes);"
         "CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, data JSONB NOT NULL DEFAULT '{}', updated_at TIMESTAMPTZ DEFAULT NOW());"
+        "CREATE TABLE IF NOT EXISTS audit_log (id SERIAL PRIMARY KEY, usuario TEXT NOT NULL, accion TEXT NOT NULL, rut_paciente TEXT, ip TEXT, detalle TEXT, created_at TIMESTAMPTZ DEFAULT NOW());"
+        "CREATE INDEX IF NOT EXISTS idx_audit_rut ON audit_log(rut_paciente);"
+        "CREATE INDEX IF NOT EXISTS idx_audit_usuario ON audit_log(usuario);"
     )
     with _get_conn() as conn:
         with conn.cursor() as cur:
@@ -237,6 +240,7 @@ def save_users(users: Dict[str, Any]) -> None:
 
 def load_users() -> Dict[str, Any]:
     return get_users()
+
 
 
 def get_profesionales() -> Dict[str, Any]:
@@ -462,4 +466,28 @@ def save_tasas(data: dict) -> None:
                 ON CONFLICT (key) DO UPDATE SET data=EXCLUDED.data, updated_at=NOW()
             """, (json.dumps(data),))
             conn.commit()
-            
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# AUDIT LOG
+# ══════════════════════════════════════════════════════════════════════════════
+
+def log_acceso(
+    usuario: str,
+    accion: str,
+    rut_paciente: str = None,
+    ip: str = None,
+    detalle: str = None,
+) -> None:
+    """Registra un acceso a ficha clínica en la tabla audit_log."""
+    try:
+        with _get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO audit_log (usuario, accion, rut_paciente, ip, detalle, created_at)
+                    VALUES (%s, %s, %s, %s, %s, NOW())
+                """, (usuario, accion, rut_paciente, ip, detalle))
+                conn.commit()
+    except Exception as e:
+        print(f"⚠️  [AUDIT] Error registrando acceso: {e}")
+        
