@@ -267,3 +267,194 @@ def save_profesional(prof_id: str, data: Dict[str, Any]) -> None:
                 "blocked_dates": data.get("blocked_dates", []), "now": now,
             })
             conn.commit()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CAJA
+# ══════════════════════════════════════════════════════════════════════════════
+
+def get_caja_slot(date: str, professional: str, time: str) -> dict:
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT data FROM caja WHERE date=%s AND professional=%s AND time=%s", (date, professional, time))
+            row = cur.fetchone()
+            return dict(row["data"]) if row else {}
+
+def get_caja_day(date: str, professional: str) -> dict:
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT time, data FROM caja WHERE date=%s AND professional=%s", (date, professional))
+            return {row["time"]: dict(row["data"]) for row in cur.fetchall()}
+
+def save_caja_slot(date: str, professional: str, time: str, slot: dict) -> None:
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO caja (date, professional, time, data, updated_at)
+                VALUES (%s,%s,%s,%s,NOW())
+                ON CONFLICT (date, professional, time) DO UPDATE SET data=EXCLUDED.data, updated_at=NOW()
+            """, (date, professional, time, json.dumps(slot)))
+            conn.commit()
+
+def delete_caja_slot(date: str, professional: str, time: str) -> None:
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM caja WHERE date=%s AND professional=%s AND time=%s", (date, professional, time))
+            conn.commit()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGOS
+# ══════════════════════════════════════════════════════════════════════════════
+
+def get_pagos_day(date: str, professional: str) -> dict:
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT time, data FROM pagos WHERE date=%s AND professional=%s", (date, professional))
+            return {row["time"]: dict(row["data"]) for row in cur.fetchall()}
+
+def get_pagos_mes(mes: str) -> list:
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT date, professional, time, data FROM pagos WHERE mes=%s", (mes,))
+            return [{**dict(row["data"]), "fecha": row["date"], "time": row["time"], "professional": row["professional"]} for row in cur.fetchall()]
+
+def save_pago(date: str, professional: str, time: str, pago: dict) -> None:
+    mes = date[:7]
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO pagos (date, mes, professional, time, data, updated_at)
+                VALUES (%s,%s,%s,%s,%s,NOW())
+                ON CONFLICT (date, professional, time) DO UPDATE SET data=EXCLUDED.data, updated_at=NOW()
+            """, (date, mes, professional, time, json.dumps(pago)))
+            conn.commit()
+
+def update_pago(date: str, professional: str, time: str, updates: dict) -> None:
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT data FROM pagos WHERE date=%s AND professional=%s AND time=%s", (date, professional, time))
+            row = cur.fetchone()
+            if not row:
+                return
+            data = dict(row["data"])
+            data.update(updates)
+            cur.execute("UPDATE pagos SET data=%s, updated_at=NOW() WHERE date=%s AND professional=%s AND time=%s",
+                       (json.dumps(data), date, professional, time))
+            conn.commit()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# COMISIONES
+# ══════════════════════════════════════════════════════════════════════════════
+
+def get_comisiones() -> dict:
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT data FROM config WHERE key='comisiones'")
+            row = cur.fetchone()
+            return dict(row["data"]) if row else {"default": 20}
+
+def save_comisiones(data: dict) -> None:
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO config (key, data, updated_at) VALUES ('comisiones', %s, NOW())
+                ON CONFLICT (key) DO UPDATE SET data=EXCLUDED.data, updated_at=NOW()
+            """, (json.dumps(data),))
+            conn.commit()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CAJA CONFIG
+# ══════════════════════════════════════════════════════════════════════════════
+
+def get_caja_config() -> dict:
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT data FROM config WHERE key='caja_config'")
+            row = cur.fetchone()
+            return dict(row["data"]) if row else {}
+
+def save_caja_config(data: dict) -> None:
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO config (key, data, updated_at) VALUES ('caja_config', %s, NOW())
+                ON CONFLICT (key) DO UPDATE SET data=EXCLUDED.data, updated_at=NOW()
+            """, (json.dumps(data),))
+            conn.commit()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# GASTOS
+# ══════════════════════════════════════════════════════════════════════════════
+
+def get_gastos() -> dict:
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT data FROM config WHERE key='gastos'")
+            row = cur.fetchone()
+            return dict(row["data"]) if row else {}
+
+def save_gastos(data: dict) -> None:
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO config (key, data, updated_at) VALUES ('gastos', %s, NOW())
+                ON CONFLICT (key) DO UPDATE SET data=EXCLUDED.data, updated_at=NOW()
+            """, (json.dumps(data),))
+            conn.commit()
+
+def get_gastos_config() -> dict:
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT data FROM config WHERE key='gastos_config'")
+            row = cur.fetchone()
+            return dict(row["data"]) if row else {}
+
+def save_gastos_config(data: dict) -> None:
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO config (key, data, updated_at) VALUES ('gastos_config', %s, NOW())
+                ON CONFLICT (key) DO UPDATE SET data=EXCLUDED.data, updated_at=NOW()
+            """, (json.dumps(data),))
+            conn.commit()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RRHH
+# ══════════════════════════════════════════════════════════════════════════════
+
+def get_trabajadores() -> dict:
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT data FROM config WHERE key='trabajadores'")
+            row = cur.fetchone()
+            return dict(row["data"]) if row else {}
+
+def save_trabajadores(data: dict) -> None:
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO config (key, data, updated_at) VALUES ('trabajadores', %s, NOW())
+                ON CONFLICT (key) DO UPDATE SET data=EXCLUDED.data, updated_at=NOW()
+            """, (json.dumps(data),))
+            conn.commit()
+
+def get_tasas() -> dict:
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT data FROM config WHERE key='tasas'")
+            row = cur.fetchone()
+            return dict(row["data"]) if row else {}
+
+def save_tasas(data: dict) -> None:
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO config (key, data, updated_at) VALUES ('tasas', %s, NOW())
+                ON CONFLICT (key) DO UPDATE SET data=EXCLUDED.data, updated_at=NOW()
+            """, (json.dumps(data),))
+            conn.commit()
