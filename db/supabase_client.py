@@ -344,4 +344,156 @@ def save_profesional(prof_id: str, data: Dict[str, Any]) -> None:
                 "now":          now,
             })
             conn.commit()
-          
+
+
+def init_db():
+    """
+    Crea todas las tablas si no existen.
+    Llamar al arrancar el backend en main.py
+    """
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS usuarios (
+                    id           TEXT PRIMARY KEY,
+                    password     TEXT NOT NULL,
+                    active       BOOLEAN DEFAULT TRUE,
+                    professional TEXT,
+                    role         JSONB,
+                    created_at   TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at   TIMESTAMPTZ DEFAULT NOW()
+                );
+
+                CREATE TABLE IF NOT EXISTS profesionales (
+                    id            TEXT PRIMARY KEY,
+                    name          TEXT NOT NULL,
+                    rut           TEXT,
+                    specialty     TEXT,
+                    active        BOOLEAN DEFAULT TRUE,
+                    schedule      JSONB,
+                    blocked_dates TEXT[],
+                    created_at    TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at    TIMESTAMPTZ DEFAULT NOW()
+                );
+
+                CREATE TABLE IF NOT EXISTS pacientes (
+                    rut              TEXT PRIMARY KEY,
+                    nombre           TEXT,
+                    apellido_paterno TEXT,
+                    apellido_materno TEXT,
+                    fecha_nacimiento TEXT,
+                    sexo             TEXT,
+                    email            TEXT,
+                    telefono         TEXT,
+                    direccion        TEXT,
+                    ciudad           TEXT,
+                    prevision        TEXT,
+                    ocupacion        TEXT,
+                    extra            JSONB,
+                    created_at       TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at       TIMESTAMPTZ DEFAULT NOW()
+                );
+
+                CREATE TABLE IF NOT EXISTS eventos (
+                    id              SERIAL PRIMARY KEY,
+                    rut_paciente    TEXT NOT NULL REFERENCES pacientes(rut),
+                    professional_id TEXT REFERENCES profesionales(id),
+                    fecha_hora      TEXT NOT NULL,
+                    tipo            TEXT,
+                    contenido       JSONB NOT NULL,
+                    created_at      TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at      TIMESTAMPTZ DEFAULT NOW()
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_eventos_rut   ON eventos(rut_paciente);
+                CREATE INDEX IF NOT EXISTS idx_eventos_fecha ON eventos(fecha_hora);
+
+                CREATE TABLE IF NOT EXISTS sedes (
+                    id         TEXT PRIMARY KEY,
+                    regiones   JSONB,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                );
+
+                CREATE TABLE IF NOT EXISTS trabajadores (
+                    id         SERIAL PRIMARY KEY,
+                    data       JSONB NOT NULL,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                );
+
+                CREATE TABLE IF NOT EXISTS gastos (
+                    id         SERIAL PRIMARY KEY,
+                    periodo    TEXT NOT NULL,
+                    data       JSONB NOT NULL,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                );
+
+                CREATE TABLE IF NOT EXISTS comisiones (
+                    id         SERIAL PRIMARY KEY,
+                    data       JSONB NOT NULL,
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                );
+
+                CREATE TABLE IF NOT EXISTS slots (
+                    id           SERIAL PRIMARY KEY,
+                    date         TEXT NOT NULL,
+                    time         TEXT NOT NULL,
+                    professional TEXT NOT NULL,
+                    status       TEXT NOT NULL DEFAULT 'reserved',
+                    rut          TEXT,
+                    extra        JSONB DEFAULT '{}',
+                    updated_at   TIMESTAMPTZ DEFAULT NOW(),
+                    UNIQUE (date, time, professional)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_slots_date         ON slots(date);
+                CREATE INDEX IF NOT EXISTS idx_slots_professional  ON slots(professional);
+                CREATE INDEX IF NOT EXISTS idx_slots_date_prof     ON slots(date, professional);
+            """)
+            conn.commit()
+            print("✅ [DB] Tablas verificadas/creadas correctamente")
+
+
+def init_db():
+    """
+    Crea todas las tablas si no existen.
+    Llamar al arrancar el backend en main.py
+    """
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS usuarios (
+                    id           TEXT PRIMARY KEY,
+                    password     TEXT DEFAULT '',
+                    active       BOOLEAN DEFAULT TRUE,
+                    professional TEXT,
+                    role         JSONB,
+                    created_at   TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at   TIMESTAMPTZ DEFAULT NOW()
+                );
+
+                CREATE TABLE IF NOT EXISTS profesionales (
+                    id            TEXT PRIMARY KEY,
+                    name          TEXT NOT NULL,
+                    rut           TEXT,
+                    specialty     TEXT,
+                    active        BOOLEAN DEFAULT TRUE,
+                    schedule      JSONB,
+                    blocked_dates TEXT[],
+                    created_at    TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at    TIMESTAMPTZ DEFAULT NOW()
+                );
+
+                CREATE TABLE IF NOT EXISTS pacientes (
+                    rut              TEXT PRIMARY KEY,
+                    nombre           TEXT,
+                    apellido_paterno TEXT,
+                    apellido_materno TEXT,
+                    fecha_nacimiento TEXT,
+                    sexo             TEXT,
+                    email            TEXT,
+                    telefono         TEXT,
+                    direccion        TEXT,
+                    ciudad           TEXT,
+                    prevision        TEXT,
