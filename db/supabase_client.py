@@ -132,8 +132,6 @@ def update_paciente(rut: str, data: Dict[str, Any]) -> Dict[str, Any]:
                 "apellido_materno": data.get("apellido_materno", ""),
                 "fecha_nacimiento": data.get("fecha_nacimiento", ""),
                 "sexo": data.get("sexo", ""), "email": data.get("email", ""),
-
-
                 "telefono": data.get("telefono", ""), "direccion": data.get("direccion", ""),
                 "ciudad": data.get("ciudad", ""), "prevision": data.get("prevision", ""),
                 "ocupacion": data.get("ocupacion", ""),
