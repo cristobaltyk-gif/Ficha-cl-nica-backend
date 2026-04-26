@@ -62,6 +62,7 @@ from core.geo_router                                import router as geo_router
 from modules.control.control_sobrecupo_router       import router as sobrecupo_router
 from modules.caja.caja_config_router                import router as caja_config_router
 from admin.data_map_router                          import router as data_map_router
+from agenda.bloqueo_router import router as bloqueo_router
 
 # ==========================
 # APP CORE
@@ -121,6 +122,7 @@ app.include_router(geo_router)
 app.include_router(sobrecupo_router)
 app.include_router(caja_config_router)
 app.include_router(data_map_router)
+app.include_router(bloqueo_router)
 
 # ==========================
 # HEALTHCHECK
