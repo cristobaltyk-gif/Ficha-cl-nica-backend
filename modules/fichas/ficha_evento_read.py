@@ -1,52 +1,42 @@
 from __future__ import annotations
 
-from datetime import datetime
-from zoneinfo import ZoneInfo
+from typing import List, Dict, Any
 
 from fastapi import APIRouter, HTTPException, Depends
 from auth.internal_auth import require_internal_auth
-from modules.fichas.ficha_evento_schema import FichaEventoCreate
-from agenda.store import set_slot
-from db.supabase_client import get_paciente, create_evento
+from db.supabase_client import get_paciente, get_eventos, get_eventos_resumen
+from core.professionals_store import list_professionals
 
 router = APIRouter(
     prefix="/api/fichas/evento",
-    tags=["Ficha Clínica - Evento"],
+    tags=["Ficha Clínica - Read"],
     dependencies=[Depends(require_internal_auth)]
 )
 
 
-def chile_now() -> str:
-    return datetime.now(ZoneInfo("America/Santiago")).isoformat()
-
-
-@router.post("")
-def save_clinical_event(
-    data: FichaEventoCreate,
+@router.get("/{rut}")
+def get_clinical_events(
+    rut: str,
     user=Depends(require_internal_auth)
-):
-    rut = data.rut
+) -> List[Dict[str, Any]]:
+
+    role = user.get("role", {})
+    if role.get("name") not in ["medico", "kinesiologia"]:
+        raise HTTPException(status_code=403, detail="No autorizado para leer ficha clínica")
 
     if not get_paciente(rut):
         raise HTTPException(status_code=404, detail="La ficha del paciente no existe")
 
-    evento = data.dict()
-    evento["professional_id"]   = user["professional"]
-    evento["professional_user"] = user["usuario"]
-    evento["professional_role"] = user["role"]
-    evento["created_at"]        = chile_now()
+    professionals_list = list_professionals()
+    professionals_map  = {p["id"]: p for p in professionals_list}
 
-    try:
-        create_evento(rut, evento)
-    except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+    eventos = get_eventos(rut)
+    for ev in eventos:
+        pid = ev.get("professional_id")
+        if pid and pid in professionals_map:
+            ev["professional_name"] = professionals_map[pid]["name"]
+        else:
+            ev["professional_name"] = pid or ""
 
-    set_slot(
-        date=data.fecha,
-        time=data.hora,
-        professional=user["usuario"],
-        status="evaluated",
-        rut=rut
-    )
-
-    return {"status": "ok", "rut": rut}
+    return eventos
+    
