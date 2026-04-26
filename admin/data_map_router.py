@@ -89,19 +89,31 @@ def list_all_json_files():
     return {"total_files": len(files), "total_size": _sizeof_fmt(total), "files": files}
 
 
-# ══════════════════════════════════════════════════════
-# MIGRACIÓN — leer JSON del disco e importar a PostgreSQL
-# ══════════════════════════════════════════════════════
-
 @router.post("/migrate")
 def migrate_all():
     """
-    Lee users.json y professionals.json del disco
-    y los importa a PostgreSQL. Ejecutar una sola vez.
+    Migra usuarios, profesionales y pacientes desde /data a PostgreSQL.
+    Ejecutar una sola vez.
     """
-    from db.supabase_client import save_user, save_profesional
+    from db.supabase_client import _get_conn, save_user, save_profesional, create_paciente, create_evento, get_paciente
 
-    results = {"usuarios": 0, "profesionales": 0, "errores": []}
+    results = {
+        "usuarios": 0,
+        "profesionales": 0,
+        "pacientes": 0,
+        "eventos": 0,
+        "errores": []
+    }
+
+    # Arreglar columna password para permitir vacío
+    try:
+        with _get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("ALTER TABLE usuarios ALTER COLUMN password DROP NOT NULL")
+                cur.execute("ALTER TABLE usuarios ALTER COLUMN password SET DEFAULT ''")
+                conn.commit()
+    except Exception:
+        pass  # Ya fue alterada antes
 
     # Migrar usuarios
     users_file = DATA_DIR / "users.json"
@@ -124,5 +136,38 @@ def migrate_all():
                 results["profesionales"] += 1
             except Exception as e:
                 results["errores"].append(f"profesional {pid}: {str(e)}")
+
+    # Migrar pacientes y eventos
+    pacientes_dir = DATA_DIR / "pacientes"
+    if pacientes_dir.exists():
+        for pdir in sorted(pacientes_dir.iterdir()):
+            if not pdir.is_dir():
+                continue
+            rut = pdir.name
+
+            # Migrar admin.json
+            admin_file = pdir / "admin.json"
+            if admin_file.exists():
+                try:
+                    data = json.loads(admin_file.read_text(encoding="utf-8"))
+                    if not get_paciente(rut):
+                        create_paciente(data)
+                    results["pacientes"] += 1
+                except Exception as e:
+                    results["errores"].append(f"paciente {rut}: {str(e)}")
+                    continue
+
+            # Migrar eventos
+            eventos_dir = pdir / "eventos"
+            if eventos_dir.exists():
+                for ev_file in sorted(eventos_dir.glob("*.json")):
+                    try:
+                        evento = json.loads(ev_file.read_text(encoding="utf-8"))
+                        create_evento(rut, evento)
+                        results["eventos"] += 1
+                    except ValueError:
+                        pass  # Duplicado, ignorar
+                    except Exception as e:
+                        results["errores"].append(f"evento {rut}/{ev_file.name}: {str(e)}")
 
     return results
