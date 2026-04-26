@@ -1,17 +1,15 @@
+"""
+agenda/summary_router.py
+------------------------
+Reemplaza lectura de /data/professionals.json → PostgreSQL
+"""
 from __future__ import annotations
 
 from datetime import date, timedelta, datetime
 from typing import Dict, Any, List
-import json
-from pathlib import Path
 
 from agenda import store
 
-# ======================================================
-# CANÓNICO ICA — SUMMARY ENGINE (PRODUCCIÓN)
-# ======================================================
-
-PROFESSIONALS_PATH = Path("/data/professionals.json")
 
 FREE_THRESHOLD = 10
 LOW_THRESHOLD  = 1
@@ -19,11 +17,9 @@ FULL_THRESHOLD = 0
 
 
 def _load_professionals() -> Dict[str, Any]:
-    """Siempre fresco desde disco — refleja cambios sin reiniciar."""
-    if not PROFESSIONALS_PATH.exists():
-        return {}
-    with open(PROFESSIONALS_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+    """Lee profesionales desde PostgreSQL — siempre fresco."""
+    from db.supabase_client import get_profesionales
+    return get_profesionales()
 
 
 def _weekday_name(d: date) -> str:
@@ -107,4 +103,4 @@ def month_summary(*, professional: str, month: str) -> Dict[str, Any]:
 
 def week_summary(*, professional: str, week_start: str) -> Dict[str, Any]:
     return range_summary(professional=professional, start_date=week_start, days=7)
-    
+        
