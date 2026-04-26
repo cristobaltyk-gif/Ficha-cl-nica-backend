@@ -1,9 +1,13 @@
+"""
+agenda/service.py
+-----------------
+Reemplaza lecturas de /data/professionals.json y /data/pacientes → PostgreSQL
+Misma interfaz que el service original.
+"""
 from __future__ import annotations
 
-import json
-from pathlib import Path
-from typing import Dict, Any
 from datetime import date as _date
+from typing import Dict, Any
 
 from agenda import store
 from agenda.models import (
@@ -23,31 +27,22 @@ from agenda.utils import (
     today_utc,
 )
 
-DEFAULT_INTERVAL_MIN    = 15
-AUTO_CLEANUP_DAYS_AHEAD = 0
-
-BASE_PACIENTES     = Path("/data/pacientes")
-PROFESSIONALS_PATH = Path("/data/professionals.json")
+DEFAULT_INTERVAL_MIN = 15
 
 
-# =============================
-# Helpers internos
-# =============================
+# ══════════════════════════════════════════════════════════════
+# HELPERS — ahora leen desde PostgreSQL
+# ══════════════════════════════════════════════════════════════
 
 def _load_admin(rut: str) -> dict | None:
-    f = BASE_PACIENTES / rut / "admin.json"
-    if not f.exists():
-        return None
-    with open(f, "r", encoding="utf-8") as fp:
-        return json.load(fp)
+    from db.supabase_client import get_paciente
+    return get_paciente(rut)
 
 
 def _get_professional_name(professional_id: str) -> str:
-    if not PROFESSIONALS_PATH.exists():
-        return professional_id
-    with open(PROFESSIONALS_PATH, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    return data.get(professional_id, {}).get("name", professional_id)
+    from db.supabase_client import get_profesionales
+    profs = get_profesionales()
+    return profs.get(professional_id, {}).get("name", professional_id)
 
 
 def _calcular_edad(fecha_nacimiento: str) -> int | None:
@@ -69,12 +64,7 @@ def _calcular_edad(fecha_nacimiento: str) -> int | None:
         return None
 
 
-def _enviar_confirmacion_reserva(
-    rut: str,
-    date: str,
-    time: str,
-    professional: str
-) -> None:
+def _enviar_confirmacion_reserva(rut, date, time, professional) -> None:
     try:
         from notifications.email_service import enviar_confirmacion_reserva
         admin = _load_admin(rut)
@@ -83,10 +73,10 @@ def _enviar_confirmacion_reserva(
         email = admin.get("email", "").strip()
         if not email:
             return
-        nombre = f"{admin.get('nombre', '')} {admin.get('apellido_paterno', '')}".strip()
+        nombre     = f"{admin.get('nombre', '')} {admin.get('apellido_paterno', '')}".strip()
         nombre_prof = _get_professional_name(professional)
-        edad  = _calcular_edad(admin.get("fecha_nacimiento", ""))
-        sexo  = admin.get("sexo", "")
+        edad       = _calcular_edad(admin.get("fecha_nacimiento", ""))
+        sexo       = admin.get("sexo", "")
         enviar_confirmacion_reserva(
             email_paciente=email,
             nombre_paciente=nombre,
@@ -101,9 +91,9 @@ def _enviar_confirmacion_reserva(
         print(f"⚠️ No se pudo enviar email de confirmación: {e}")
 
 
-# =============================
-# Lecturas
-# =============================
+# ══════════════════════════════════════════════════════════════
+# LECTURAS
+# ══════════════════════════════════════════════════════════════
 
 def get_day(date: str) -> Dict[str, Any]:
     parse_yyyy_mm_dd(date)
@@ -116,9 +106,9 @@ def get_occupancy(date: str, time: str) -> Dict[str, SlotStatus]:
     return store.read_occupancy(date, time)
 
 
-# =============================
-# Reglas internas
-# =============================
+# ══════════════════════════════════════════════════════════════
+# REGLAS
+# ══════════════════════════════════════════════════════════════
 
 def _assert_interval(time: str, interval: int = DEFAULT_INTERVAL_MIN) -> None:
     if not is_on_interval(time, interval):
@@ -132,14 +122,13 @@ def _assert_free(date: str, time: str, professional: str) -> None:
 
 
 def _assert_not_past_date(slot_date: str) -> None:
-    """Permite cancelar cualquier hora de hoy — bloquea solo fechas pasadas."""
     if parse_yyyy_mm_dd(slot_date) < today_utc():
         raise ValueError("No se puede cancelar un slot de una fecha pasada.")
 
 
-# =============================
-# Mutaciones
-# =============================
+# ══════════════════════════════════════════════════════════════
+# MUTACIONES
+# ══════════════════════════════════════════════════════════════
 
 def create_slot(req: CreateSlotRequest) -> MutationResult:
     parse_yyyy_mm_dd(req.date)
@@ -176,7 +165,6 @@ def confirm_slot(req: ConfirmSlotRequest) -> MutationResult:
     parse_hh_mm(req.time)
 
     professional = req.professional
-
     day  = store.read_day(req.date)
     prof = day.get(professional, {})
     slot = prof.get("slots", {}).get(req.time)
@@ -208,22 +196,19 @@ def confirm_slot(req: ConfirmSlotRequest) -> MutationResult:
 def cancel_slot(req: CancelSlotRequest) -> MutationResult:
     parse_yyyy_mm_dd(req.date)
     parse_hh_mm(req.time)
-    # Permite cancelar cualquier hora de hoy — bloquea solo fechas pasadas
     _assert_not_past_date(req.date)
-
-    professional = req.professional
 
     store.clear_slot(
         date=req.date,
         time=req.time,
-        professional=professional,
+        professional=req.professional,
     )
 
     return MutationResult(
         ok=True,
         message="Slot anulado",
         date=req.date,
-        professional=professional,
+        professional=req.professional,
         slot={"time": req.time, "status": "available"},
     )
 
@@ -239,12 +224,10 @@ def reschedule(req: RescheduleRequest) -> MutationResult:
 
     _assert_interval(f.time)
     _assert_interval(t.time)
-
     assert_future_slot(f.date, f.time)
     assert_future_slot(t.date, t.time)
 
     professional = f.professional
-
     _assert_free(t.date, t.time, professional)
 
     day  = store.read_day(f.date)
@@ -257,16 +240,12 @@ def reschedule(req: RescheduleRequest) -> MutationResult:
     rut = slot.get("rut")
 
     store.set_slot(
-        date=t.date,
-        time=t.time,
+        date=t.date, time=t.time,
         professional=professional,
-        status=slot["status"],
-        rut=rut,
+        status=slot["status"], rut=rut,
     )
-
     store.clear_slot(
-        date=f.date,
-        time=f.time,
+        date=f.date, time=f.time,
         professional=professional,
     )
 
@@ -281,11 +260,7 @@ def reschedule(req: RescheduleRequest) -> MutationResult:
     )
 
 
-# =============================
-# Limpieza diaria
-# =============================
-
 def daily_cleanup() -> None:
     keep_from = today_utc().isoformat()
     store.cleanup_past(keep_from_date=keep_from)
-        
+    
