@@ -140,4 +140,3 @@ def start_backup_scheduler():
     t = threading.Thread(target=_loop, daemon=True)
     t.start()
     print("🚀 [BACKUP] Scheduler backup iniciado")
-    
