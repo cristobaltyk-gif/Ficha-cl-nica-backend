@@ -193,12 +193,10 @@ def create_evento(rut: str, evento: Dict[str, Any]) -> Dict[str, Any]:
             conn.commit()
             evento["_id"] = cur.fetchone()["id"]
             return evento
-
-
 def get_users() -> Dict[str, Any]:
     with _get_conn() as conn:
         with conn.cursor() as cur:
-                      cur.execute("SELECT * FROM usuarios")
+            cur.execute("SELECT * FROM usuarios")
             rows = cur.fetchall()
             return {
                 row["id"]: {
@@ -458,4 +456,5 @@ def save_tasas(data: dict) -> None:
                 ON CONFLICT (key) DO UPDATE SET data=EXCLUDED.data, updated_at=NOW()
             """, (json.dumps(data),))
             conn.commit()
-                   
+            
+
