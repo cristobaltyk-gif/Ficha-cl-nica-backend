@@ -1,14 +1,29 @@
+"""
+admin/data_map_router.py
+------------------------
+Endpoint de diagnóstico — mapea toda la estructura de /data
+sin exponer datos sensibles.
+
+Uso: GET /admin/data-map
+     Header: Authorization: Bearer <token_admin>
+"""
+
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException
+from auth.auth_service import get_current_user  # ajusta si tu import es distinto
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
+
 DATA_DIR = Path("/data")
 
+
+# ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _sizeof_fmt(num_bytes: int) -> str:
     for unit in ["B", "KB", "MB", "GB"]:
@@ -19,6 +34,7 @@ def _sizeof_fmt(num_bytes: int) -> str:
 
 
 def _sample_keys(obj: Any, max_depth: int = 2) -> Any:
+    """Devuelve solo las claves de un dict/list, sin valores sensibles."""
     if max_depth == 0:
         return "..."
     if isinstance(obj, dict):
@@ -27,147 +43,158 @@ def _sample_keys(obj: Any, max_depth: int = 2) -> Any:
         if not obj:
             return []
         return [_sample_keys(obj[0], max_depth - 1), f"... ({len(obj)} items)"]
+    # Valor escalar → solo tipo
     return type(obj).__name__
 
 
 def _analyze_json(path: Path) -> Dict[str, Any]:
+    """Analiza un archivo JSON y retorna metadata sin datos sensibles."""
     try:
         size = path.stat().st_size
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
+
         if isinstance(data, dict):
-            return {"size": _sizeof_fmt(size), "type": "object", "count": len(data), "structure": _sample_keys(data)}
-        if isinstance(data, list):
-            return {"size": _sizeof_fmt(size), "type": "array", "count": len(data), "structure": _sample_keys(data)}
-        return {"size": _sizeof_fmt(size), "type": "scalar", "count": 1}
+            count = len(data)
+            structure = _sample_keys(data)
+            dtype = "object"
+        elif isinstance(data, list):
+            count = len(data)
+            structure = _sample_keys(data)
+            dtype = "array"
+        else:
+            count = 1
+            structure = type(data).__name__
+            dtype = "scalar"
+
+        return {
+            "size":      _sizeof_fmt(size),
+            "type":      dtype,
+            "count":     count,
+            "structure": structure,
+            "error":     None,
+        }
     except Exception as e:
-        return {"size": "?", "type": "error", "count": 0, "error": str(e)}
+        return {
+            "size":      _sizeof_fmt(path.stat().st_size) if path.exists() else "?",
+            "type":      "error",
+            "count":     0,
+            "structure": {},
+            "error":     str(e),
+        }
 
 
 def _map_directory(directory: Path) -> Dict[str, Any]:
+    """Recorre recursivamente un directorio y mapea su contenido."""
     result = {}
+
     if not directory.exists():
         return {"error": f"{directory} no existe"}
+
     for item in sorted(directory.iterdir()):
-        if item.is_file() and item.suffix == ".json":
-            result[item.name] = _analyze_json(item)
+        if item.is_file():
+            if item.suffix == ".json":
+                result[item.name] = _analyze_json(item)
+            else:
+                result[item.name] = {
+                    "size": _sizeof_fmt(item.stat().st_size),
+                    "type": item.suffix or "file",
+                }
         elif item.is_dir():
+            # Para directorios de pacientes (muchos subdirs), resumir
             subdirs = [x for x in item.iterdir() if x.is_dir()]
             files   = [x for x in item.iterdir() if x.is_file()]
-            if len(subdirs) > 5:
-                sample = subdirs[0]
+
+            if len(subdirs) > 10:
+                # Es un directorio con muchos registros (ej: /data/pacientes)
+                sample_dir  = subdirs[0] if subdirs else None
+                sample_data = {}
+                if sample_dir:
+                    sample_data = {
+                        f.name: _analyze_json(f) if f.suffix == ".json" else f.suffix
+                        for f in sorted(sample_dir.iterdir())[:5]
+                    }
+
                 result[item.name] = {
-                    "type": "directory_records",
-                    "total_records": len(subdirs),
-                    "direct_files": [f.name for f in files],
-                    "sample_record": sample.name,
-                    "sample_structure": {
-                        f.name: _analyze_json(f)
-                        for f in sorted(sample.iterdir())[:5]
-                        if f.suffix == ".json"
-                    },
+                    "type":            "directory_records",
+                    "total_records":   len(subdirs),
+                    "direct_files":    [f.name for f in files],
+                    "sample_record":   sample_dir.name if sample_dir else None,
+                    "sample_structure": sample_data,
                 }
             else:
                 result[item.name] = _map_directory(item)
+
     return result
 
 
+def _count_totals(mapped: Dict[str, Any]) -> Dict[str, int]:
+    """Cuenta totales globales para el resumen."""
+    totals = {"json_files": 0, "directories": 0, "records": 0}
+
+    def _walk(obj):
+        if not isinstance(obj, dict):
+            return
+        if obj.get("type") == "directory_records":
+            totals["directories"] += 1
+            totals["records"] += obj.get("total_records", 0)
+            return
+        if "structure" in obj and "count" in obj:
+            totals["json_files"] += 1
+            return
+        for v in obj.values():
+            _walk(v)
+
+    _walk(mapped)
+    return totals
+
+
+# ── Endpoint ───────────────────────────────────────────────────────────────────
+
 @router.get("/data-map")
-def get_data_map():
+def get_data_map(current_user: dict = Depends(get_current_user)):
+    """
+    Mapea toda la estructura de /data.
+    Solo accesible por usuarios con rol admin.
+    """
+    # Verificar rol admin
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Solo administradores")
+
     mapped = _map_directory(DATA_DIR)
-    return {"data_dir": str(DATA_DIR), "structure": mapped}
+    totals = _count_totals(mapped)
+
+    return {
+        "data_dir":  str(DATA_DIR),
+        "summary":   totals,
+        "structure": mapped,
+    }
 
 
 @router.get("/data-map/files")
-def list_all_json_files():
+def list_all_json_files(current_user: dict = Depends(get_current_user)):
+    """
+    Lista plana de todos los archivos JSON con su tamaño.
+    Útil para planificar la migración.
+    """
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Solo administradores")
+
     files = []
-    total = 0
-    for f in sorted(DATA_DIR.rglob("*.json")):
-        size = f.stat().st_size
-        total += size
-        files.append({"path": str(f.relative_to(DATA_DIR)), "size": _sizeof_fmt(size)})
-    return {"total_files": len(files), "total_size": _sizeof_fmt(total), "files": files}
+    total_size = 0
 
+    for json_file in sorted(DATA_DIR.rglob("*.json")):
+        size = json_file.stat().st_size
+        total_size += size
+        files.append({
+            "path":     str(json_file.relative_to(DATA_DIR)),
+            "size":     _sizeof_fmt(size),
+            "size_bytes": size,
+        })
 
-@router.post("/migrate")
-def migrate_all():
-    """
-    Migra usuarios, profesionales y pacientes desde /data a PostgreSQL.
-    Ejecutar una sola vez.
-    """
-    from db.supabase_client import _get_conn, save_user, save_profesional, create_paciente, create_evento, get_paciente
-
-    results = {
-        "usuarios": 0,
-        "profesionales": 0,
-        "pacientes": 0,
-        "eventos": 0,
-        "errores": []
+    return {
+        "total_files": len(files),
+        "total_size":  _sizeof_fmt(total_size),
+        "files":       files,
     }
-
-    # Arreglar columna password para permitir vacío
-    try:
-        with _get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute("ALTER TABLE usuarios ALTER COLUMN password DROP NOT NULL")
-                cur.execute("ALTER TABLE usuarios ALTER COLUMN password SET DEFAULT ''")
-                conn.commit()
-    except Exception:
-        pass  # Ya fue alterada antes
-
-    # Migrar usuarios
-    users_file = DATA_DIR / "users.json"
-    if users_file.exists():
-        users = json.loads(users_file.read_text(encoding="utf-8"))
-        for uid, data in users.items():
-            try:
-                save_user(uid, data)
-                results["usuarios"] += 1
-            except Exception as e:
-                results["errores"].append(f"usuario {uid}: {str(e)}")
-
-    # Migrar profesionales
-    profs_file = DATA_DIR / "professionals.json"
-    if profs_file.exists():
-        profs = json.loads(profs_file.read_text(encoding="utf-8"))
-        for pid, data in profs.items():
-            try:
-                save_profesional(pid, data)
-                results["profesionales"] += 1
-            except Exception as e:
-                results["errores"].append(f"profesional {pid}: {str(e)}")
-
-    # Migrar pacientes y eventos
-    pacientes_dir = DATA_DIR / "pacientes"
-    if pacientes_dir.exists():
-        for pdir in sorted(pacientes_dir.iterdir()):
-            if not pdir.is_dir():
-                continue
-            rut = pdir.name
-
-            # Migrar admin.json
-            admin_file = pdir / "admin.json"
-            if admin_file.exists():
-                try:
-                    data = json.loads(admin_file.read_text(encoding="utf-8"))
-                    if not get_paciente(rut):
-                        create_paciente(data)
-                    results["pacientes"] += 1
-                except Exception as e:
-                    results["errores"].append(f"paciente {rut}: {str(e)}")
-                    continue
-
-            # Migrar eventos
-            eventos_dir = pdir / "eventos"
-            if eventos_dir.exists():
-                for ev_file in sorted(eventos_dir.glob("*.json")):
-                    try:
-                        evento = json.loads(ev_file.read_text(encoding="utf-8"))
-                        create_evento(rut, evento)
-                        results["eventos"] += 1
-                    except ValueError:
-                        pass  # Duplicado, ignorar
-                    except Exception as e:
-                        results["errores"].append(f"evento {rut}/{ev_file.name}: {str(e)}")
-
-    return results
+    
