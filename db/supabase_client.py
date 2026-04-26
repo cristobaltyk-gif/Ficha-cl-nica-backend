@@ -66,6 +66,10 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_slots_date ON slots(date);"
         "CREATE INDEX IF NOT EXISTS idx_slots_professional ON slots(professional);"
         "CREATE INDEX IF NOT EXISTS idx_slots_date_prof ON slots(date, professional);"
+        "CREATE TABLE IF NOT EXISTS caja (id SERIAL PRIMARY KEY, date TEXT NOT NULL, professional TEXT NOT NULL, time TEXT NOT NULL, data JSONB NOT NULL DEFAULT '{}', updated_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE (date, professional, time));"
+        "CREATE TABLE IF NOT EXISTS pagos (id SERIAL PRIMARY KEY, date TEXT NOT NULL, mes TEXT NOT NULL, professional TEXT NOT NULL, time TEXT NOT NULL, data JSONB NOT NULL DEFAULT '{}', updated_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE (date, professional, time));"
+        "CREATE INDEX IF NOT EXISTS idx_pagos_mes ON pagos(mes);"
+        "CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, data JSONB NOT NULL DEFAULT '{}', updated_at TIMESTAMPTZ DEFAULT NOW());"
     )
     with _get_conn() as conn:
         with conn.cursor() as cur:
@@ -458,3 +462,4 @@ def save_tasas(data: dict) -> None:
                 ON CONFLICT (key) DO UPDATE SET data=EXCLUDED.data, updated_at=NOW()
             """, (json.dumps(data),))
             conn.commit()
+        
