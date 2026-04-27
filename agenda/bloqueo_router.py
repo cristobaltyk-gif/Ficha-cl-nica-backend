@@ -1,111 +1,162 @@
-"""
-agenda/bloqueo_router.py
-------------------------
-Bloqueo de fechas específicas en agenda.
-- Secretaria: puede bloquear cualquier profesional
-- Médico/Kine: solo puede bloquear su propio horario
-"""
-from __future__ import annotations
+/**
+ * components/agenda/BloqueoAgendaModal.jsx
+ */
+import { useState } from "react";
 
-from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
-from typing import Optional
+const API_URL = import.meta.env.VITE_API_URL;
 
-from auth.internal_auth import require_internal_auth
-from agenda.store import read_day, clear_slot
-from db.supabase_client import get_paciente, get_profesionales
+export default function BloqueoAgendaModal({ open, professional, onClose, onSuccess, internalUser }) {
+  const [fecha,     setFecha]     = useState("");
+  const [motivo,    setMotivo]    = useState("El profesional no estará disponible este día");
+  const [saving,    setSaving]    = useState(false);
+  const [error,     setError]     = useState("");
+  const [resultado, setResultado] = useState(null);
 
-router = APIRouter(prefix="/agenda", tags=["agenda"])
+  if (!open) return null;
 
+  function handleClose() {
+    setFecha(""); setError(""); setResultado(null);
+    setMotivo("El profesional no estará disponible este día");
+    onClose();
+  }
 
-class BloquearDiaRequest(BaseModel):
-    date:         str
-    professional: str
-    motivo:       Optional[str] = "El profesional no estará disponible este día"
+  async function desbloquearDia() {
+    if (!fecha) { setError("Selecciona una fecha"); return; }
+    setSaving(true); setError("");
+    try {
+      const res = await fetch(`${API_URL}/agenda/bloquear-dia/${professional}/${fecha}`, {
+        method: "DELETE",
+        headers: { "X-Internal-User": internalUser || "" },
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || "Error al desbloquear");
+      setResultado({ desbloqueado: true });
+      onSuccess?.();
+    } catch (e) { setError(e.message); }
+    finally { setSaving(false); }
+  }
 
+  async function bloquearDia() {
+    if (!fecha) { setError("Selecciona una fecha"); return; }
+    setSaving(true); setError("");
+    try {
+      const res = await fetch(`${API_URL}/agenda/bloquear-dia`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-User": internalUser || "" },
+        body: JSON.stringify({ date: fecha, professional, motivo })
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || "Error al bloquear");
+      setResultado(await res.json());
+      onSuccess?.();
+    } catch (e) { setError(e.message); }
+    finally { setSaving(false); }
+  }
 
-def _can_manage(user: dict, professional: str) -> bool:
-    role = user.get("role", {}).get("name", "")
-    if role in ("secretaria", "admin"):
-        return True
-    if role in ("medico", "kine"):
-        return user.get("professional") == professional
-    return False
+  async function desbloquearDia() {
+    if (!fecha) { setError("Selecciona una fecha"); return; }
+    setSaving(true); setError("");
+    try {
+      const res = await fetch(`${API_URL}/agenda/bloquear-dia/${professional}/${fecha}`, {
+        method: "DELETE",
+        headers: { "X-Internal-User": internalUser || "" },
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || "Error al desbloquear");
+      setResultado({ ok: true, desbloqueado: true });
+      onSuccess?.();
+    } catch (e) { setError(e.message); }
+    finally { setSaving(false); }
+  }
 
+  return (
+    <div style={{
+      position:"fixed", inset:0, background:"rgba(15,23,42,0.5)",
+      display:"flex", alignItems:"flex-end", justifyContent:"center", zIndex:400
+    }} onClick={e => e.target === e.currentTarget && handleClose()}>
 
-def _get_professional_name(professional: str) -> str:
-    profs = get_profesionales()
-    return profs.get(professional, {}).get("name", professional)
+      <div style={{
+        background:"#fff", borderRadius:"20px 20px 0 0",
+        width:"100%", maxWidth:480,
+        boxShadow:"0 -8px 40px rgba(0,0,0,0.15)",
+        fontFamily:"'DM Sans',system-ui,sans-serif"
+      }}>
 
+        {/* Header */}
+        <div style={{
+          padding:"20px 20px 16px", borderBottom:"1px solid #f1f5f9",
+          display:"flex", alignItems:"center", justifyContent:"space-between"
+        }}>
+          <div>
+            <p style={{margin:0, fontSize:16, fontWeight:700, color:"#0f172a"}}>Bloqueo de agenda</p>
+            <p style={{margin:0, fontSize:12, color:"#94a3b8"}}>{professional}</p>
+          </div>
+          <button onClick={handleClose} style={{background:"none",border:"none",cursor:"pointer",color:"#94a3b8",padding:4}}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
 
-@router.post("/bloquear-dia")
-def bloquear_dia(data: BloquearDiaRequest, user=Depends(require_internal_auth)):
-    if not _can_manage(user, data.professional):
-        raise HTTPException(status_code=403, detail="No autorizado para bloquear este profesional")
+        <div style={{padding:"16px 20px 32px"}}>
 
-    from notifications.email_service import enviar_notificacion_bloqueo
-    from agenda import professionals_store as prof_store
+          {error && (
+            <div style={{background:"#fef2f2",border:"1px solid #fecaca",color:"#dc2626",
+              padding:"10px 12px",borderRadius:8,fontSize:13,marginBottom:12}}>{error}</div>
+          )}
 
-    day_data    = read_day(data.date)
-    prof_slots  = day_data.get(data.professional, {}).get("slots", {})
-    nombre_prof = _get_professional_name(data.professional)
+          {resultado && (
+            <div style={{background:"#f0fdf4",border:"1px solid #86efac",color:"#166534",
+              padding:"14px",borderRadius:8,fontSize:13,marginBottom:16}}>
+              {resultado.desbloqueado
+                ? <p style={{margin:0,fontWeight:700}}>🔓 Día desbloqueado correctamente</p>
+                : <>
+                    <p style={{margin:"0 0 4px",fontWeight:700}}>🔒 Día bloqueado correctamente</p>
+                    <p style={{margin:0}}>{resultado.notificados} paciente{resultado.notificados !== 1 ? "s" : ""} notificado{resultado.notificados !== 1 ? "s" : ""}</p>
+                  </>
+              }
+            </div>
+          )}
 
-    notificados = 0
-    errores     = []
+          {/* Fecha */}
+          <div style={{marginBottom:14}}>
+            <p style={{fontSize:10,fontWeight:700,textTransform:"uppercase",
+              letterSpacing:"0.12em",color:"#94a3b8",margin:"0 0 6px"}}>Fecha</p>
+            <input type="date" value={fecha} onChange={e => { setFecha(e.target.value); setResultado(null); }}
+              style={{width:"100%",padding:"10px 12px",border:"1px solid #e2e8f0",
+                borderRadius:8,fontSize:14,fontFamily:"inherit",outline:"none",boxSizing:"border-box"}}/>
+          </div>
 
-    # 1. Notificar y eliminar slots reservados
-    for time, slot in prof_slots.items():
-        if slot.get("status") in ("reserved", "confirmed"):
-            rut = slot.get("rut")
-            if rut:
-                try:
-                    admin = get_paciente(rut)
-                    email = (admin.get("email") or "").strip() if admin else ""
-                    if email:
-                        nombre = f"{admin.get('nombre','')} {admin.get('apellido_paterno','')}".strip()
-                        enviar_notificacion_bloqueo(
-                            email_paciente=email,
-                            nombre_paciente=nombre,
-                            fecha=data.date,
-                            hora=time,
-                            profesional_nombre=nombre_prof,
-                            motivo=data.motivo,
-                        )
-                        notificados += 1
-                except Exception as e:
-                    errores.append(f"notificar {rut} {time}: {e}")
+          {/* Motivo */}
+          <div style={{marginBottom:20}}>
+            <p style={{fontSize:10,fontWeight:700,textTransform:"uppercase",
+              letterSpacing:"0.12em",color:"#94a3b8",margin:"0 0 6px"}}>
+              Motivo (se enviará a los pacientes)
+            </p>
+            <input value={motivo} onChange={e => setMotivo(e.target.value)}
+              style={{width:"100%",padding:"10px 12px",border:"1px solid #e2e8f0",
+                borderRadius:8,fontSize:13,fontFamily:"inherit",outline:"none",boxSizing:"border-box"}}/>
+          </div>
 
-        # Eliminar el slot
-        try:
-            clear_slot(date=data.date, time=time, professional=data.professional)
-        except Exception as e:
-            errores.append(f"eliminar {time}: {e}")
+          {/* Botones */}
+          <div style={{display:"flex",gap:10}}>
+            <button onClick={desbloquearDia} disabled={saving || !fecha} style={{
+              flex:1, padding:"12px", background:"#f0fdf4", color:"#16a34a",
+              border:"1px solid #86efac", borderRadius:8, fontSize:13,
+              fontWeight:700, cursor: !fecha ? "not-allowed" : "pointer",
+              opacity: !fecha ? 0.5 : 1
+            }}>
+              🔓 Desbloquear
+            </button>
+            <button onClick={bloquearDia} disabled={saving || !fecha} style={{
+              flex:1, padding:"12px", background:"#dc2626", color:"#fff",
+              border:"none", borderRadius:8, fontSize:13,
+              fontWeight:700, cursor: !fecha ? "not-allowed" : "pointer",
+              opacity: saving || !fecha ? 0.6 : 1
+            }}>
+              {saving ? "Procesando…" : "🔒 Bloquear y notificar"}
+            </button>
+          </div>
 
-    # 2. Agregar fecha a blocked_dates del profesional
-    try:
-        prof_store.block_date(professional_id=data.professional, date_iso=data.date)
-    except Exception as e:
-        errores.append(f"block_date: {e}")
-
-    return {
-        "ok":           True,
-        "date":         data.date,
-        "professional": data.professional,
-        "notificados":  notificados,
-        "errores":      errores,
-    }
-
-
-@router.delete("/bloquear-dia/{professional}/{date}")
-def desbloquear_dia(professional: str, date: str, user=Depends(require_internal_auth)):
-    if not _can_manage(user, professional):
-        raise HTTPException(status_code=403, detail="No autorizado para desbloquear este profesional")
-
-    from agenda import professionals_store as prof_store
-    try:
-        prof_store.unblock_date(professional_id=professional, date_iso=date)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    return {"ok": True, "date": date, "professional": professional}
-    
+        </div>
+      </div>
+    </div>
+  );
+}
