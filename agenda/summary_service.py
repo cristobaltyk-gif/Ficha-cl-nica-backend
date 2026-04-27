@@ -49,7 +49,7 @@ def _count_free_slots(
     if not prof_cfg or not prof_cfg.get("active"):
         return -1
 
-    # Verificar si la fecha está bloqueada
+    # Fecha bloqueada
     blocked_dates = prof_cfg.get("blocked_dates") or []
     if current_date.isoformat() in blocked_dates:
         return -1
@@ -74,12 +74,16 @@ def _count_free_slots(
 def range_summary(*, professional: str, start_date: str, days: int) -> Dict[str, Any]:
     professionals = _load_professionals()
     start         = date.fromisoformat(start_date)
-    result_days: Dict[str, str] = {}
+    end           = start + timedelta(days=days - 1)
 
+    # UNA sola query para todo el rango
+    all_data = store.read_range(start.isoformat(), end.isoformat())
+
+    result_days: Dict[str, str] = {}
     for i in range(days):
         current    = start + timedelta(days=i)
         iso        = current.isoformat()
-        day_data   = store.read_day(iso)
+        day_data   = all_data.get(iso, {})
         free_slots = _count_free_slots(day_data, professional, current, professionals)
         result_days[iso] = "empty" if free_slots == -1 else _day_status(free_slots)
 
@@ -99,4 +103,3 @@ def month_summary(*, professional: str, month: str) -> Dict[str, Any]:
 
 def week_summary(*, professional: str, week_start: str) -> Dict[str, Any]:
     return range_summary(professional=professional, start_date=week_start, days=7)
-    
