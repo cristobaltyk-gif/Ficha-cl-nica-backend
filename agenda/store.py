@@ -71,6 +71,44 @@ def read_occupancy(date: str, time: str) -> Dict[str, str]:
     return {row["professional"]: row["status"] for row in rows}
 
 
+
+def read_range(date_from: str, date_to: str) -> Dict[str, Any]:
+    """
+    Retorna todos los slots entre dos fechas en UNA sola query.
+    {
+        "YYYY-MM-DD": {
+            professional_id: {
+                "slots": { "HH:MM": {...} }
+            }
+        }
+    }
+    """
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT date, professional, time, status, rut, extra
+                FROM slots
+                WHERE date >= %s AND date <= %s
+            """, (date_from, date_to))
+            rows = cur.fetchall()
+
+    result: Dict[str, Any] = {}
+    for row in rows:
+        date = row["date"]
+        prof = row["professional"]
+        if date not in result:
+            result[date] = {}
+        if prof not in result[date]:
+            result[date][prof] = {"slots": {}}
+        slot = {"status": row["status"]}
+        if row["rut"]:
+            slot["rut"] = row["rut"]
+        if row["extra"]:
+            slot.update(row["extra"])
+        result[date][prof]["slots"][row["time"]] = slot
+
+    return result
+
 # ══════════════════════════════════════════════════════════════
 # ESCRITURA
 # ══════════════════════════════════════════════════════════════
@@ -216,3 +254,4 @@ def save_store(store: dict) -> None:
                                 updated_at = EXCLUDED.updated_at
                         """, (date, time, prof, status, rut, _json.dumps(extra)))
             conn.commit()
+            
