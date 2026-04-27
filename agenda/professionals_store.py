@@ -1,3 +1,7 @@
+"""
+agenda/professionals_store.py
+Lee/escribe profesionales desde PostgreSQL.
+"""
 import json
 from pathlib import Path
 from threading import Lock
@@ -8,6 +12,7 @@ LOCK = Lock()
 
 
 def _load_all() -> Dict[str, Any]:
+    """Lee desde disco como fallback legacy."""
     if not DATA_PATH.exists():
         DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
         DATA_PATH.write_text("{}", encoding="utf-8")
@@ -23,16 +28,9 @@ def save_professionals(data: Dict[str, Any]) -> None:
 
 
 def load_professionals() -> Dict[str, Any]:
-    """Devuelve solo profesionales activos con schedule."""
-    data = _load_all()
-    valid = {}
-    for pid, p in data.items():
-        if not p.get("active"):
-            continue
-        if "schedule" not in p:
-            continue
-        valid[pid] = p
-    return valid
+    """Devuelve profesionales activos con schedule desde PostgreSQL."""
+    from db.supabase_client import get_profesionales
+    return get_profesionales()
 
 
 def set_day_blocks(
@@ -42,58 +40,57 @@ def set_day_blocks(
     blocks: List[Dict[str, str]],
     slot_minutes: int = 15
 ) -> None:
-    with LOCK:
-        data = _load_all()
-        prof = data.get(professional_id)
-        if not prof:
-            raise ValueError("Profesional no existe")
-
-        schedule = prof.setdefault("schedule", {})
-        schedule["slotMinutes"] = slot_minutes
-        days = schedule.setdefault("days", {})
-        days[weekday] = blocks  # array directo [{start, end}]
-
-        save_professionals(data)
+    from db.supabase_client import _get_conn, get_profesionales, save_profesional
+    profs = get_profesionales()
+    prof  = profs.get(professional_id)
+    if not prof:
+        raise ValueError("Profesional no existe")
+    schedule = prof.get("schedule") or {}
+    schedule["slotMinutes"] = slot_minutes
+    schedule.setdefault("days", {})[weekday] = blocks
+    prof["schedule"] = schedule
+    save_profesional(professional_id, prof)
 
 
 def close_day(*, professional_id: str, weekday: str) -> None:
-    with LOCK:
-        data = _load_all()
-        prof = data.get(professional_id)
-        if not prof:
-            raise ValueError("Profesional no existe")
-
-        days = prof.get("schedule", {}).get("days", {})
-        if weekday in days:
-            del days[weekday]
-
-        save_professionals(data)
+    from db.supabase_client import get_profesionales, save_profesional
+    profs = get_profesionales()
+    prof  = profs.get(professional_id)
+    if not prof:
+        raise ValueError("Profesional no existe")
+    days = prof.get("schedule", {}).get("days", {})
+    if weekday in days:
+        del days[weekday]
+    save_profesional(professional_id, prof)
 
 
 def block_date(*, professional_id: str, date_iso: str) -> None:
-    with LOCK:
-        data = _load_all()
-        prof = data.get(professional_id)
-        if not prof:
-            raise ValueError("Profesional no existe")
-
-        blocked = prof.setdefault("blocked_dates", [])
-        if date_iso not in blocked:
-            blocked.append(date_iso)
-
-        save_professionals(data)
+    from db.supabase_client import get_profesionales, save_profesional
+    profs   = get_profesionales()
+    prof    = profs.get(professional_id)
+    if not prof:
+        raise ValueError("Profesional no existe")
+    blocked = prof.get("blocked_dates") or []
+    if date_iso not in blocked:
+        blocked.append(date_iso)
+    prof["blocked_dates"] = blocked
+    save_profesional(professional_id, prof)
 
 
 def unblock_date(*, professional_id: str, date_iso: str) -> None:
-    with LOCK:
-        data = _load_all()
-        prof = data.get(professional_id)
-        if not prof:
-            raise ValueError("Profesional no existe")
+    from db.supabase_client import get_profesionales, save_profesional
+    profs   = get_profesionales()
+    prof    = profs.get(professional_id)
+    if not prof:
+        raise ValueError("Profesional no existe")
+    blocked = prof.get("blocked_dates") or []
+    if date_iso in blocked:
+        blocked.remove(date_iso)
+    prof["blocked_dates"] = blocked
+    save_profesional(professional_id, prof)
 
-        blocked = prof.get("blocked_dates", [])
-        if date_iso in blocked:
-            blocked.remove(date_iso)
 
-        save_professionals(data)
-        
+def list_professionals() -> List[Dict[str, Any]]:
+    from db.supabase_client import get_profesionales
+    return list(get_profesionales().values())
+    
