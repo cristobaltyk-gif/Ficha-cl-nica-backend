@@ -52,6 +52,7 @@ class CajaUpdate(BaseModel):
     arrival_status: Optional[str] = None
     tipo_atencion:  Optional[str] = None
     pagado:         Optional[bool] = None
+    hora_llegada:   Optional[str] = None
 
 class CajaSlotDelete(BaseModel):
     date: str; professional: str; time: str
@@ -114,6 +115,7 @@ def update_caja_slot(data: CajaUpdate, auth=Depends(require_internal_auth)):
         cs["monto"]         = get_valor_tipo(professional, data.tipo_atencion)
         cs["es_gratuito"]   = data.tipo_atencion in TIPOS_GRATUITOS
     if data.pagado is not None: cs["pagado"] = data.pagado
+    if data.hora_llegada is not None: cs["hora_llegada"] = data.hora_llegada
     save_caja_slot(data.date, professional, data.time, cs)
     return {"ok": True, "time": data.time}
 
@@ -289,4 +291,4 @@ def get_pdf_mes(month: str, professional: Optional[str]=Query(None), auth=Depend
     filename = f"caja_{month}_{professional}.pdf" if professional else f"caja_{month}.pdf"
     return StreamingResponse(buf, media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename={filename}"})
-    
+        
