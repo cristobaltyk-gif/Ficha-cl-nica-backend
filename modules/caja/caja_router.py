@@ -96,6 +96,7 @@ def get_caja_day_endpoint(date: str, professional: str, auth=Depends(require_int
             "tipo_atencion": tipo, "monto": monto,
             "pagado": cs.get("pagado", False),
             "es_gratuito": tipo in TIPOS_GRATUITOS,
+            "hora_llegada": cs.get("hora_llegada"),
         })
     result.sort(key=lambda x: x["time"])
     return {"date": date, "professional": professional, "slots": result}
@@ -291,4 +292,4 @@ def get_pdf_mes(month: str, professional: Optional[str]=Query(None), auth=Depend
     filename = f"caja_{month}_{professional}.pdf" if professional else f"caja_{month}.pdf"
     return StreamingResponse(buf, media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename={filename}"})
-        
+                
