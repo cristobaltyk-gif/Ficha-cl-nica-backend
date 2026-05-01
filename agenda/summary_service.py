@@ -3,7 +3,7 @@ agenda/summary_service.py
 """
 from __future__ import annotations
 
-from datetime import date, timedelta, datetime
+from datetime import date, timedelta, datetime, timezone
 from typing import Dict, Any, List
 
 from agenda import store
@@ -39,6 +39,34 @@ def _count_slots_in_blocks(blocks: List[Dict[str, str]], slot_minutes: int) -> i
     return total
 
 
+def _now_chile_str() -> str:
+    """Hora actual en Chile (UTC-4 horario de verano, UTC-3 invierno)."""
+    from datetime import timedelta
+    now_utc = datetime.now(timezone.utc)
+    # Chile Standard Time = UTC-4 (aplica la mayor parte del año)
+    now_chile = now_utc - timedelta(hours=4)
+    return now_chile.strftime("%H:%M")
+
+
+def _count_future_slots_in_blocks(
+    blocks: List[Dict[str, str]],
+    slot_minutes: int,
+    from_time: str
+) -> int:
+    """Cuenta solo slots >= from_time."""
+    total = 0
+    for b in blocks:
+        minutes     = int(b["start"].split(":")[0]) * 60 + int(b["start"].split(":")[1])
+        end_minutes = int(b["end"].split(":")[0])   * 60 + int(b["end"].split(":")[1])
+        while minutes < end_minutes:
+            hh = str(minutes // 60).zfill(2)
+            mm = str(minutes % 60).zfill(2)
+            if f"{hh}:{mm}" >= from_time:
+                total += 1
+            minutes += slot_minutes
+    return total
+
+
 def _count_free_slots(
     day_data: Dict[str, Any],
     professional: str,
@@ -64,9 +92,21 @@ def _count_free_slots(
         return -1
 
     slot_minutes = schedule.get("slotMinutes", 15)
-    total_slots  = _count_slots_in_blocks(day_blocks, slot_minutes)
-    prof_day     = day_data.get(professional, {})
-    busy         = len(prof_day.get("slots", {}))
+
+    # Si es hoy, contar solo slots futuros
+    if current_date == date.today():
+        now_str     = _now_chile_str()
+        total_slots = _count_future_slots_in_blocks(day_blocks, slot_minutes, now_str)
+    else:
+        total_slots = _count_slots_in_blocks(day_blocks, slot_minutes)
+
+    prof_day = day_data.get(professional, {})
+
+    # Solo contar como ocupados los slots reservados/confirmados
+    busy = len([
+        t for t, s in prof_day.get("slots", {}).items()
+        if s.get("status") in ("reserved", "confirmed")
+    ])
 
     return max(total_slots - busy, 0)
 
@@ -103,3 +143,4 @@ def month_summary(*, professional: str, month: str) -> Dict[str, Any]:
 
 def week_summary(*, professional: str, week_start: str) -> Dict[str, Any]:
     return range_summary(professional=professional, start_date=week_start, days=7)
+    
