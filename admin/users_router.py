@@ -4,9 +4,6 @@ from auth.users_store import load_users, save_users
 router = APIRouter(prefix="/admin/users", tags=["admin-users"])
 
 
-# ======================================================
-# GET — lista todos los usuarios (sin passwords)
-# ======================================================
 @router.get("")
 def list_users():
     users = load_users()
@@ -21,9 +18,6 @@ def list_users():
     return result
 
 
-# ======================================================
-# POST — crear usuario
-# ======================================================
 @router.post("")
 def create_user(data: dict):
     username = data.get("username")
@@ -34,27 +28,30 @@ def create_user(data: dict):
     if not password:
         raise HTTPException(status_code=400, detail="Falta password")
 
-    rol = data.get("role", "secretaria")
+    rol   = data.get("role", "secretaria")
+    scope = data.get("scope", "ica")  # "ica" o "externo"
+
+    if scope not in ("ica", "externo"):
+        raise HTTPException(status_code=400, detail="scope debe ser 'ica' o 'externo'")
 
     users = load_users()
 
     if username in users:
         raise HTTPException(status_code=409, detail="Usuario ya existe")
 
-    # Construir rol completo según nombre
     entry_map = {
         "admin":      "/admin",
         "secretaria": "/secretaria",
         "medico":     "/medico",
         "kine":       "/kine",
-        "psicologo": "/psicologo",
+        "psicologo":  "/psicologo",
     }
     allow_map = {
         "admin":      ["agenda", "pacientes", "atencion", "documentos", "administracion"],
         "secretaria": ["agenda", "pacientes"],
         "medico":     ["agenda", "pacientes", "atencion", "documentos"],
         "kine":       ["agenda", "pacientes"],
-        "psicologo": ["agenda", "pacientes"],
+        "psicologo":  ["agenda", "pacientes"],
     }
 
     users[username] = {
@@ -64,7 +61,8 @@ def create_user(data: dict):
         "role": {
             "name":  rol,
             "entry": entry_map.get(rol, f"/{rol}"),
-            "allow": allow_map.get(rol, [])
+            "allow": allow_map.get(rol, []),
+            "scope": scope,
         }
     }
 
@@ -72,9 +70,6 @@ def create_user(data: dict):
     return {"ok": True, "username": username}
 
 
-# ======================================================
-# PUT — actualizar usuario (password, active, rol)
-# ======================================================
 @router.put("/{username}")
 def update_user(username: str, data: dict):
     users = load_users()
@@ -91,13 +86,17 @@ def update_user(username: str, data: dict):
     if "role" in data:
         users[username]["role"] = data["role"]
 
+    # Permitir actualizar scope directamente
+    if "scope" in data:
+        if data["scope"] not in ("ica", "externo"):
+            raise HTTPException(status_code=400, detail="scope debe ser 'ica' o 'externo'")
+        if "role" not in data:
+            users[username].setdefault("role", {})["scope"] = data["scope"]
+
     save_users(users)
     return {"ok": True}
 
 
-# ======================================================
-# DELETE — eliminar usuario
-# ======================================================
 @router.delete("/{username}")
 def delete_user(username: str):
     users = load_users()
@@ -108,4 +107,4 @@ def delete_user(username: str):
     del users[username]
     save_users(users)
     return {"ok": True}
-  
+    
