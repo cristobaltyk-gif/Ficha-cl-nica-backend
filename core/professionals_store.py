@@ -11,6 +11,22 @@ from typing import Dict, Any, List, Optional
 from db.supabase_client import _get_conn, _utc_now, get_profesionales, save_profesional
 from db.supabase_client import get_users, save_user
 
+ENTRY_MAP = {
+    "medico":     "/medico",
+    "kine":       "/kine",
+    "psicologo":  "/psicologo",
+    "secretaria": "/secretaria",
+    "admin":      "/admin",
+}
+
+ALLOW_MAP = {
+    "medico":     ["agenda", "pacientes", "atencion", "documentos"],
+    "kine":       ["agenda", "pacientes"],
+    "psicologo":  ["agenda", "pacientes"],
+    "secretaria": ["agenda", "pacientes"],
+    "admin":      ["agenda", "pacientes", "atencion", "documentos", "administracion"],
+}
+
 
 def _es_interno(p: Dict[str, Any]) -> bool:
     id_str   = str(p.get("id", "")).lower().replace(" ", "_")
@@ -48,13 +64,18 @@ def add_professional(professional: Dict[str, Any]) -> Dict[str, Any]:
     username = professional.get("username") or pid
 
     if username not in users:
-        role = professional.get("role", "medico")
+        # rol puede llegar como string o como dict
+        rol_raw = professional.get("role", "medico")
+        rol     = rol_raw if isinstance(rol_raw, str) else rol_raw.get("name", "medico")
+        scope   = professional.get("scope", "ica")
+
         save_user(username, {
             "password":     professional.get("password", "cambiar123"),
             "role": {
-                "name":  role,
-                "entry": f"/{role}",
-                "allow": ["agenda", "pacientes", "atencion", "documentos"]
+                "name":  rol,
+                "entry": ENTRY_MAP.get(rol, f"/{rol}"),
+                "allow": ALLOW_MAP.get(rol, ["agenda", "pacientes"]),
+                "scope": scope,
             },
             "professional": pid,
             "active":       True
@@ -81,12 +102,11 @@ def delete_professional(pid: str) -> Dict[str, Any]:
 
     with _get_conn() as conn:
         with conn.cursor() as cur:
-            # Eliminar profesional
             cur.execute("DELETE FROM profesionales WHERE id = %s", (pid,))
-            # Eliminar usuario asociado
-            cur.execute("DELETE FROM usuarios WHERE id = %s", (username,))
-            # Eliminar sede
+            # Eliminar por id Y por professional por si el username difiere
+            cur.execute("DELETE FROM usuarios WHERE id = %s OR id = %s", (username, pid))
             cur.execute("DELETE FROM sedes WHERE id = %s", (pid,))
             conn.commit()
 
     return prof
+    
