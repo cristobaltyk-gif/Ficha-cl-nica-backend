@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from auth.users_store import load_users, save_users
+from db.supabase_client import _get_conn
 
 router = APIRouter(prefix="/admin/users", tags=["admin-users"])
 
@@ -29,7 +30,7 @@ def create_user(data: dict):
         raise HTTPException(status_code=400, detail="Falta password")
 
     rol   = data.get("role", "secretaria")
-    scope = data.get("scope", "ica")  # "ica" o "externo"
+    scope = data.get("scope", "ica")
 
     if scope not in ("ica", "externo"):
         raise HTTPException(status_code=400, detail="scope debe ser 'ica' o 'externo'")
@@ -79,14 +80,10 @@ def update_user(username: str, data: dict):
 
     if "password" in data and data["password"]:
         users[username]["password"] = data["password"]
-
     if "active" in data:
         users[username]["active"] = data["active"]
-
     if "role" in data:
         users[username]["role"] = data["role"]
-
-    # Permitir actualizar scope directamente
     if "scope" in data:
         if data["scope"] not in ("ica", "externo"):
             raise HTTPException(status_code=400, detail="scope debe ser 'ica' o 'externo'")
@@ -106,5 +103,16 @@ def delete_user(username: str):
 
     del users[username]
     save_users(users)
+
+    # Borrar también de profesionales y sedes si existe ahí
+    try:
+        with _get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM profesionales WHERE id = %s", (username,))
+                cur.execute("DELETE FROM sedes WHERE id = %s", (username,))
+                conn.commit()
+    except Exception:
+        pass
+
     return {"ok": True}
     
