@@ -73,6 +73,18 @@ def init_db():
         "CREATE TABLE IF NOT EXISTS audit_log (id SERIAL PRIMARY KEY, usuario TEXT NOT NULL, accion TEXT NOT NULL, rut_paciente TEXT, ip TEXT, detalle TEXT, created_at TIMESTAMPTZ DEFAULT NOW());"
         "CREATE INDEX IF NOT EXISTS idx_audit_rut ON audit_log(rut_paciente);"
         "CREATE INDEX IF NOT EXISTS idx_audit_usuario ON audit_log(usuario);"
+        "CREATE TABLE IF NOT EXISTS suscripciones ("
+        "centro_id TEXT PRIMARY KEY, nombre_centro TEXT NOT NULL, "
+        "plan TEXT NOT NULL DEFAULT 'centro', roles JSONB DEFAULT '{}', "
+        "precio_base INTEGER NOT NULL DEFAULT 0, descuento_pct INTEGER NOT NULL DEFAULT 0, "
+        "descuento_motivo TEXT DEFAULT '', descuento_hasta TEXT, "
+        "precio_final INTEGER NOT NULL DEFAULT 0, estado TEXT NOT NULL DEFAULT 'activo', "
+        "fecha_inicio TEXT, fecha_vencimiento TEXT, flow_customer_id TEXT, "
+        "flow_subscription_id TEXT, email_contacto TEXT NOT NULL DEFAULT '', "
+        "metodo_pago TEXT NOT NULL DEFAULT 'manual', "
+        "created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW());"
+        "CREATE INDEX IF NOT EXISTS idx_suscripciones_estado ON suscripciones(estado);"
+        "CREATE INDEX IF NOT EXISTS idx_suscripciones_vencimiento ON suscripciones(fecha_vencimiento);"
     )
     with _get_conn() as conn:
         with conn.cursor() as cur:
@@ -240,7 +252,6 @@ def save_users(users: Dict[str, Any]) -> None:
 
 def load_users() -> Dict[str, Any]:
     return get_users()
-
 
 
 def get_profesionales() -> Dict[str, Any]:
@@ -432,24 +443,8 @@ def save_gastos_config(data: dict) -> None:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# RRHH
+# TASAS RRHH
 # ══════════════════════════════════════════════════════════════════════════════
-
-def get_trabajadores() -> dict:
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT data FROM config WHERE key='trabajadores'")
-            row = cur.fetchone()
-            return dict(row["data"]) if row else {}
-
-def save_trabajadores(data: dict) -> None:
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO config (key, data, updated_at) VALUES ('trabajadores', %s, NOW())
-                ON CONFLICT (key) DO UPDATE SET data=EXCLUDED.data, updated_at=NOW()
-            """, (json.dumps(data),))
-            conn.commit()
 
 def get_tasas() -> dict:
     with _get_conn() as conn:
@@ -472,22 +467,118 @@ def save_tasas(data: dict) -> None:
 # AUDIT LOG
 # ══════════════════════════════════════════════════════════════════════════════
 
-def log_acceso(
-    usuario: str,
-    accion: str,
-    rut_paciente: str = None,
-    ip: str = None,
-    detalle: str = None,
-) -> None:
-    """Registra un acceso a ficha clínica en la tabla audit_log."""
-    try:
-        with _get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    INSERT INTO audit_log (usuario, accion, rut_paciente, ip, detalle, created_at)
-                    VALUES (%s, %s, %s, %s, %s, NOW())
-                """, (usuario, accion, rut_paciente, ip, detalle))
-                conn.commit()
-    except Exception as e:
-        print(f"⚠️  [AUDIT] Error registrando acceso: {e}")
-        
+def log_acceso(usuario: str, accion: str = "ver_ficha", rut_paciente: str = None,
+               rut: str = None, ip: str = None, detalle: str = None, tipo: str = None) -> None:
+    rut_final = rut_paciente or rut
+    accion_final = accion if accion != "ver_ficha" else (f"ver_ficha_{tipo}" if tipo else "ver_ficha")
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO audit_log (usuario, accion, rut_paciente, ip, detalle)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (usuario, accion_final, rut_final, ip, detalle))
+            conn.commit()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SUSCRIPCIONES
+# ══════════════════════════════════════════════════════════════════════════════
+
+PRECIOS_ROL = {
+    "medico":     30000,
+    "kine":       25000,
+    "psicologo":  30000,
+    "secretaria": 20000,
+    "admin":      20000,
+}
+
+PRECIOS_EXTERNO = {
+    "externo_base":     35000,
+    "externo_completo": 50000,
+}
+
+
+def calcular_precio_centro(roles: dict, descuento_pct: int = 0) -> dict:
+    detalle = {}
+    precio_base = 0
+    for rol, cantidad in roles.items():
+        precio_rol = PRECIOS_ROL.get(rol, 0)
+        subtotal   = precio_rol * cantidad
+        detalle[rol] = {"cantidad": cantidad, "precio_unitario": precio_rol, "subtotal": subtotal}
+        precio_base += subtotal
+    descuento_monto = int(precio_base * descuento_pct / 100)
+    precio_final    = precio_base - descuento_monto
+    return {
+        "precio_base": precio_base, "descuento_pct": descuento_pct,
+        "descuento_monto": descuento_monto, "precio_final": precio_final, "detalle": detalle,
+    }
+
+
+def get_suscripcion(centro_id: str) -> Optional[Dict[str, Any]]:
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM suscripciones WHERE centro_id = %s", (centro_id,))
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+
+def get_all_suscripciones() -> List[Dict[str, Any]]:
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM suscripciones ORDER BY created_at DESC")
+            return [dict(r) for r in cur.fetchall()]
+
+
+def save_suscripcion(data: Dict[str, Any]) -> None:
+    now = _utc_now()
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO suscripciones (
+                    centro_id, nombre_centro, plan, roles, precio_base,
+                    descuento_pct, descuento_motivo, descuento_hasta, precio_final,
+                    estado, fecha_inicio, fecha_vencimiento, flow_customer_id,
+                    flow_subscription_id, email_contacto, metodo_pago, created_at, updated_at
+                ) VALUES (
+                    %(centro_id)s, %(nombre_centro)s, %(plan)s, %(roles)s, %(precio_base)s,
+                    %(descuento_pct)s, %(descuento_motivo)s, %(descuento_hasta)s, %(precio_final)s,
+                    %(estado)s, %(fecha_inicio)s, %(fecha_vencimiento)s, %(flow_customer_id)s,
+                    %(flow_subscription_id)s, %(email_contacto)s, %(metodo_pago)s, %(now)s, %(now)s
+                )
+                ON CONFLICT (centro_id) DO UPDATE SET
+                    nombre_centro=EXCLUDED.nombre_centro, plan=EXCLUDED.plan,
+                    roles=EXCLUDED.roles, precio_base=EXCLUDED.precio_base,
+                    descuento_pct=EXCLUDED.descuento_pct, descuento_motivo=EXCLUDED.descuento_motivo,
+                    descuento_hasta=EXCLUDED.descuento_hasta, precio_final=EXCLUDED.precio_final,
+                    estado=EXCLUDED.estado, fecha_inicio=EXCLUDED.fecha_inicio,
+                    fecha_vencimiento=EXCLUDED.fecha_vencimiento,
+                    flow_customer_id=EXCLUDED.flow_customer_id,
+                    flow_subscription_id=EXCLUDED.flow_subscription_id,
+                    email_contacto=EXCLUDED.email_contacto,
+                    metodo_pago=EXCLUDED.metodo_pago, updated_at=EXCLUDED.updated_at
+            """, {
+                "centro_id": data["centro_id"], "nombre_centro": data.get("nombre_centro", ""),
+                "plan": data.get("plan", "centro"), "roles": json.dumps(data.get("roles", {})),
+                "precio_base": data.get("precio_base", 0), "descuento_pct": data.get("descuento_pct", 0),
+                "descuento_motivo": data.get("descuento_motivo", ""),
+                "descuento_hasta": data.get("descuento_hasta"),
+                "precio_final": data.get("precio_final", 0), "estado": data.get("estado", "activo"),
+                "fecha_inicio": data.get("fecha_inicio"), "fecha_vencimiento": data.get("fecha_vencimiento"),
+                "flow_customer_id": data.get("flow_customer_id"),
+                "flow_subscription_id": data.get("flow_subscription_id"),
+                "email_contacto": data.get("email_contacto", ""),
+                "metodo_pago": data.get("metodo_pago", "manual"), "now": now,
+            })
+            conn.commit()
+
+
+def update_suscripcion(centro_id: str, updates: Dict[str, Any]) -> None:
+    now = _utc_now()
+    sets = ", ".join(f"{k}=%({k})s" for k in updates)
+    sets += ", updated_at=%(now)s"
+    params = {**updates, "centro_id": centro_id, "now": now}
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"UPDATE suscripciones SET {sets} WHERE centro_id=%(centro_id)s", params)
+            conn.commit()
+            
