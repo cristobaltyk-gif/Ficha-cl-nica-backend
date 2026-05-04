@@ -47,12 +47,14 @@ def create_user(data: dict):
         "secretaria": "/secretaria",
         "medico":     "/medico",
         "kine":       "/kine",
+        "psicologo": "/psicologo",
     }
     allow_map = {
         "admin":      ["agenda", "pacientes", "atencion", "documentos", "administracion"],
         "secretaria": ["agenda", "pacientes"],
         "medico":     ["agenda", "pacientes", "atencion", "documentos"],
         "kine":       ["agenda", "pacientes"],
+        "psicologo": ["agenda", "pacientes"],
     }
 
     users[username] = {
