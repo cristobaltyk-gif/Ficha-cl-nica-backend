@@ -464,6 +464,27 @@ def save_tasas(data: dict) -> None:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# TRABAJADORES
+# ══════════════════════════════════════════════════════════════════════════════
+
+def get_trabajadores() -> dict:
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT data FROM config WHERE key='trabajadores'")
+            row = cur.fetchone()
+            return dict(row["data"]) if row else {}
+
+def save_trabajadores(data: dict) -> None:
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO config (key, data, updated_at) VALUES ('trabajadores', %s, NOW())
+                ON CONFLICT (key) DO UPDATE SET data=EXCLUDED.data, updated_at=NOW()
+            """, (json.dumps(data),))
+            conn.commit()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # AUDIT LOG
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -581,4 +602,4 @@ def update_suscripcion(centro_id: str, updates: Dict[str, Any]) -> None:
         with conn.cursor() as cur:
             cur.execute(f"UPDATE suscripciones SET {sets} WHERE centro_id=%(centro_id)s", params)
             conn.commit()
-            
+
