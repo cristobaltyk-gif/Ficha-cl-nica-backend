@@ -257,7 +257,7 @@ def load_users() -> Dict[str, Any]:
 def get_profesionales() -> Dict[str, Any]:
     with _get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT * FROM profesionales WHERE active = TRUE AND schedule IS NOT NULL")
+            cur.execute("SELECT * FROM profesionales WHERE active = TRUE")
             rows = cur.fetchall()
             return {
                 row["id"]: {
