@@ -73,6 +73,16 @@ def init_db():
         "CREATE TABLE IF NOT EXISTS audit_log (id SERIAL PRIMARY KEY, usuario TEXT NOT NULL, accion TEXT NOT NULL, rut_paciente TEXT, ip TEXT, detalle TEXT, created_at TIMESTAMPTZ DEFAULT NOW());"
         "CREATE INDEX IF NOT EXISTS idx_audit_rut ON audit_log(rut_paciente);"
         "CREATE INDEX IF NOT EXISTS idx_audit_usuario ON audit_log(usuario);"
+        "CREATE TABLE IF NOT EXISTS centros ("
+        "id TEXT PRIMARY KEY, "
+        "nombre TEXT NOT NULL, "
+        "email_contacto TEXT NOT NULL DEFAULT \'\', "
+        "activo BOOLEAN DEFAULT TRUE, "
+        "plan TEXT NOT NULL DEFAULT \'centro\', "
+        "max_usuarios JSONB DEFAULT \'{}\', "
+        "created_at TIMESTAMPTZ DEFAULT NOW(), "
+        "updated_at TIMESTAMPTZ DEFAULT NOW());"
+        "CREATE INDEX IF NOT EXISTS idx_centros_activo ON centros(activo);"
         "CREATE TABLE IF NOT EXISTS suscripciones ("
         "centro_id TEXT PRIMARY KEY, nombre_centro TEXT NOT NULL, "
         "plan TEXT NOT NULL DEFAULT 'centro', roles JSONB DEFAULT '{}', "
@@ -603,3 +613,83 @@ def update_suscripcion(centro_id: str, updates: Dict[str, Any]) -> None:
             cur.execute(f"UPDATE suscripciones SET {sets} WHERE centro_id=%(centro_id)s", params)
             conn.commit()
 
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CENTROS
+# ══════════════════════════════════════════════════════════════════════════════
+
+def get_centros() -> List[Dict[str, Any]]:
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM centros ORDER BY nombre")
+            return [dict(r) for r in cur.fetchall()]
+
+
+def get_centro(centro_id: str) -> Optional[Dict[str, Any]]:
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM centros WHERE id = %s", (centro_id,))
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+
+def save_centro(data: Dict[str, Any]) -> None:
+    now = _utc_now()
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO centros (id, nombre, email_contacto, activo, plan, max_usuarios, created_at, updated_at)
+                VALUES (%(id)s, %(nombre)s, %(email_contacto)s, %(activo)s, %(plan)s, %(max_usuarios)s, %(now)s, %(now)s)
+                ON CONFLICT (id) DO UPDATE SET
+                    nombre=EXCLUDED.nombre, email_contacto=EXCLUDED.email_contacto,
+                    activo=EXCLUDED.activo, plan=EXCLUDED.plan,
+                    max_usuarios=EXCLUDED.max_usuarios, updated_at=EXCLUDED.updated_at
+            """, {
+                "id":            data["id"],
+                "nombre":        data.get("nombre", ""),
+                "email_contacto":data.get("email_contacto", ""),
+                "activo":        data.get("activo", True),
+                "plan":          data.get("plan", "centro"),
+                "max_usuarios":  json.dumps(data.get("max_usuarios", {})),
+                "now":           now,
+            })
+            conn.commit()
+
+
+def delete_centro(centro_id: str) -> None:
+    """Borra el centro y todos sus usuarios con ese scope."""
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            # Borrar usuarios del centro — scope = centro_id
+            cur.execute("""
+                DELETE FROM usuarios
+                WHERE role->>'scope' = %s
+            """, (centro_id,))
+            # Borrar profesionales del centro
+            cur.execute("""
+                DELETE FROM profesionales
+                WHERE id IN (
+                    SELECT id FROM usuarios WHERE role->>'scope' = %s
+                )
+            """, (centro_id,))
+            # Borrar el centro
+            cur.execute("DELETE FROM centros WHERE id = %s", (centro_id,))
+            # Borrar suscripción asociada
+            cur.execute("DELETE FROM suscripciones WHERE centro_id = %s", (centro_id,))
+            conn.commit()
+
+
+def get_usuarios_centro(centro_id: str) -> List[Dict[str, Any]]:
+    """Retorna todos los usuarios con scope = centro_id."""
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, active, professional, role
+                FROM usuarios
+                WHERE role->>'scope' = %s
+                AND id != 'public_web'
+                ORDER BY id
+            """, (centro_id,))
+            return [dict(r) for r in cur.fetchall()]
+                                                                                
