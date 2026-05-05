@@ -49,6 +49,18 @@ def get_professional(pid: str) -> Optional[Dict[str, Any]]:
     return get_profesionales().get(pid)
 
 
+def _get_professional_any(pid: str) -> Optional[Dict[str, Any]]:
+    """Busca profesional incluyendo inactivos — para operaciones de delete."""
+    try:
+        with _get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT * FROM profesionales WHERE id = %s", (pid,))
+                row = cur.fetchone()
+                return dict(row) if row else None
+    except Exception:
+        return None
+
+
 def add_professional(professional: Dict[str, Any]) -> Dict[str, Any]:
     pid = professional.get("id")
     if not pid:
@@ -64,7 +76,6 @@ def add_professional(professional: Dict[str, Any]) -> Dict[str, Any]:
     username = professional.get("username") or pid
 
     if username not in users:
-        # rol puede llegar como string o como dict
         rol_raw = professional.get("role", "medico")
         rol     = rol_raw if isinstance(rol_raw, str) else rol_raw.get("name", "medico")
         scope   = professional.get("scope", "ica")
@@ -94,7 +105,8 @@ def update_professional(pid: str, updates: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def delete_professional(pid: str) -> Dict[str, Any]:
-    prof = get_professional(pid)
+    # Buscar incluyendo inactivos
+    prof = _get_professional_any(pid)
     if not prof:
         raise ValueError("Profesional no existe")
 
@@ -103,7 +115,6 @@ def delete_professional(pid: str) -> Dict[str, Any]:
     with _get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM profesionales WHERE id = %s", (pid,))
-            # Eliminar por id Y por professional por si el username difiere
             cur.execute("DELETE FROM usuarios WHERE id = %s OR id = %s", (username, pid))
             cur.execute("DELETE FROM sedes WHERE id = %s", (pid,))
             conn.commit()
