@@ -56,6 +56,7 @@ from modules.caja.caja_config_router                import router as caja_config
 from agenda.bloqueo_router                          import router as bloqueo_router
 from modules.suscripciones.suscripcion_router       import router as suscripcion_router
 from modules.superadmin.superadmin_router           import router as superadmin_router
+from modules.superadmin.centros_router              import router as centros_router
 
 # ==========================
 # APP CORE
@@ -115,6 +116,7 @@ app.include_router(caja_config_router)
 app.include_router(bloqueo_router)
 app.include_router(suscripcion_router)
 app.include_router(superadmin_router)
+app.include_router(centros_router)
 
 # ==========================
 # HEALTHCHECK
