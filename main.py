@@ -125,5 +125,5 @@ def root():
         "status":  "ok",
         "service": "Ficha Clínica Backend",
         "modules": ["auth", "professionals", "agenda", "caja", "contable", "pagos"]
-    }
+}
     
