@@ -241,3 +241,4 @@ def enviar_aviso_suspension(
         return True
     except Exception as e:
         print(f"❌ ERROR EMAIL suspensión: {e}"); return False
+    
