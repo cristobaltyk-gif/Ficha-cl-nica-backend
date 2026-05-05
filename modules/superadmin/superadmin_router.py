@@ -5,12 +5,18 @@ Protegidos por API key — no por usuarios de BD.
 """
 from __future__ import annotations
 
+import os
+from datetime import date, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query
 from auth.superadmin_auth import require_superadmin
 from db.supabase_client import (
     _get_conn,
     get_all_suscripciones,
+    save_suscripcion,
     update_suscripcion,
+    get_suscripcion,
+    calcular_precio_centro,
+    PRECIOS_EXTERNO,
     get_users,
     save_user,
 )
@@ -21,9 +27,12 @@ router = APIRouter(
     dependencies=[Depends(require_superadmin)]
 )
 
+BACKEND_URL  = os.getenv("BACKEND_URL",  "https://services.icarticular.cl")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://admin.icarticular.cl")
+
 
 # ══════════════════════════════════════════════════════════════
-# DASHBOARD — KPIs globales
+# DASHBOARD
 # ══════════════════════════════════════════════════════════════
 
 @router.get("/dashboard")
@@ -33,21 +42,19 @@ def dashboard():
     vencidas = [s for s in suscripciones if s.get("estado") == "vencido"]
     mrr      = sum(s.get("precio_final", 0) for s in activas)
 
-    # Total usuarios activos
     users = get_users()
     usuarios_activos = sum(1 for u in users.values() if u.get("active", True))
 
-    # Total profesionales
     with _get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT COUNT(*) as total FROM profesionales WHERE active = TRUE")
             total_profesionales = cur.fetchone()["total"]
 
     return {
-        "centros_activos":    len(activas),
-        "centros_vencidos":   len(vencidas),
-        "mrr":                mrr,
-        "usuarios_activos":   usuarios_activos,
+        "centros_activos":     len(activas),
+        "centros_vencidos":    len(vencidas),
+        "mrr":                 mrr,
+        "usuarios_activos":    usuarios_activos,
         "total_profesionales": total_profesionales,
     }
 
@@ -59,6 +66,69 @@ def dashboard():
 @router.get("/suscripciones")
 def listar_suscripciones():
     return get_all_suscripciones()
+
+
+@router.post("/suscripciones")
+def crear_suscripcion(data: dict):
+    centro_id = data.get("centro_id")
+    if not centro_id:
+        raise HTTPException(400, "Falta centro_id")
+
+    plan     = data.get("plan", "centro")
+    roles    = data.get("roles", {})
+    desc_pct = data.get("descuento_pct", 0)
+
+    if plan == "centro":
+        precios = calcular_precio_centro(roles, desc_pct)
+    else:
+        precio_base = PRECIOS_EXTERNO.get(plan, 35000)
+        descuento   = int(precio_base * desc_pct / 100)
+        precios = {
+            "precio_base":  precio_base,
+            "precio_final": precio_base - descuento,
+        }
+
+    hoy = date.today()
+    suscripcion = {
+        "centro_id":           centro_id,
+        "nombre_centro":       data.get("nombre_centro", centro_id),
+        "plan":                plan,
+        "roles":               roles,
+        "precio_base":         precios["precio_base"],
+        "descuento_pct":       desc_pct,
+        "descuento_motivo":    data.get("descuento_motivo", ""),
+        "descuento_hasta":     data.get("descuento_hasta"),
+        "precio_final":        precios["precio_final"],
+        "estado":              "activo",
+        "fecha_inicio":        hoy.isoformat(),
+        "fecha_vencimiento":   (hoy + timedelta(days=30)).isoformat(),
+        "email_contacto":      data.get("email_contacto", ""),
+        "metodo_pago":         data.get("metodo_pago", "manual"),
+        "flow_customer_id":    None,
+        "flow_subscription_id":None,
+    }
+
+    save_suscripcion(suscripcion)
+
+    # Generar link de pago si hay monto
+    if precios["precio_final"] > 0 and data.get("email_contacto"):
+        try:
+            from modules.pagos.flow_client import crear_pago
+            mes    = hoy.strftime("%Y-%m")
+            result = crear_pago(
+                id_pago=f"SUB-{centro_id}-{mes}",
+                amount=precios["precio_final"],
+                subject=f"Suscripción {data.get('nombre_centro', centro_id)} — {mes}",
+                email=data.get("email_contacto"),
+                url_confirmation=f"{BACKEND_URL}/api/suscripciones/webhook/pago",
+                url_return=f"{FRONTEND_URL}/suscripciones",
+                optional_data={"centro_id": centro_id},
+            )
+            return {"ok": True, "link_pago": f"{result['url']}?token={result['token']}"}
+        except Exception as e:
+            return {"ok": True, "warning": str(e)}
+
+    return {"ok": True}
 
 
 @router.patch("/suscripciones/{centro_id}/estado")
@@ -81,8 +151,30 @@ def aplicar_descuento(centro_id: str, data: dict):
     return {"ok": True}
 
 
+@router.post("/suscripciones/{centro_id}/cobrar")
+def cobrar_suscripcion(centro_id: str):
+    s = get_suscripcion(centro_id)
+    if not s:
+        raise HTTPException(404, "Suscripción no encontrada")
+    try:
+        from modules.pagos.flow_client import crear_pago
+        mes    = date.today().strftime("%Y-%m")
+        result = crear_pago(
+            id_pago=f"SUB-{centro_id}-{mes}",
+            amount=s["precio_final"],
+            subject=f"Suscripción {s['nombre_centro']} — {mes}",
+            email=s["email_contacto"],
+            url_confirmation=f"{BACKEND_URL}/api/suscripciones/webhook/pago",
+            url_return=f"{FRONTEND_URL}/suscripciones",
+            optional_data={"centro_id": centro_id},
+        )
+        return {"ok": True, "link_pago": f"{result['url']}?token={result['token']}"}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
 # ══════════════════════════════════════════════════════════════
-# USUARIOS — vista global
+# USUARIOS
 # ══════════════════════════════════════════════════════════════
 
 @router.get("/usuarios")
@@ -111,7 +203,7 @@ def toggle_usuario(username: str, data: dict):
 
 
 # ══════════════════════════════════════════════════════════════
-# AUDIT LOG — quién accedió a qué
+# AUDIT LOG
 # ══════════════════════════════════════════════════════════════
 
 @router.get("/audit")
@@ -123,39 +215,23 @@ def audit_log(
     with _get_conn() as conn:
         with conn.cursor() as cur:
             if rut:
-                cur.execute("""
-                    SELECT * FROM audit_log
-                    WHERE rut_paciente = %s
-                    ORDER BY created_at DESC LIMIT %s
-                """, (rut, limite))
+                cur.execute("SELECT * FROM audit_log WHERE rut_paciente = %s ORDER BY created_at DESC LIMIT %s", (rut, limite))
             elif usuario:
-                cur.execute("""
-                    SELECT * FROM audit_log
-                    WHERE usuario = %s
-                    ORDER BY created_at DESC LIMIT %s
-                """, (usuario, limite))
+                cur.execute("SELECT * FROM audit_log WHERE usuario = %s ORDER BY created_at DESC LIMIT %s", (usuario, limite))
             else:
-                cur.execute("""
-                    SELECT * FROM audit_log
-                    ORDER BY created_at DESC LIMIT %s
-                """, (limite,))
+                cur.execute("SELECT * FROM audit_log ORDER BY created_at DESC LIMIT %s", (limite,))
             rows = cur.fetchall()
     return [dict(r) for r in rows]
 
 
 # ══════════════════════════════════════════════════════════════
-# PROFESIONALES — vista global
+# PROFESIONALES
 # ══════════════════════════════════════════════════════════════
 
 @router.get("/profesionales")
 def listar_profesionales():
     with _get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("""
-                SELECT id, name, rut, specialty, active, created_at
-                FROM profesionales
-                ORDER BY name
-            """)
+            cur.execute("SELECT id, name, rut, specialty, active, created_at FROM profesionales ORDER BY name")
             rows = cur.fetchall()
     return [dict(r) for r in rows]
-  
