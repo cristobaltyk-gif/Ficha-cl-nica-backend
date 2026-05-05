@@ -110,25 +110,39 @@ def crear_suscripcion(data: dict):
 
     save_suscripcion(suscripcion)
 
-    # Generar link de pago si hay monto
+    # Generar link de pago y enviar email
     if precios["precio_final"] > 0 and data.get("email_contacto"):
         try:
-            from modules.pagos.flow_client import crear_pago
-            mes    = hoy.strftime("%Y-%m")
-            result = crear_pago(
-                id_pago=f"SUB-{centro_id}-{mes}",
-                amount=precios["precio_final"],
-                subject=f"Suscripción {data.get('nombre_centro', centro_id)} — {mes}",
-                email=data.get("email_contacto"),
-                url_confirmation=f"{BACKEND_URL}/api/suscripciones/webhook/pago",
-                url_return=f"{FRONTEND_URL}/suscripciones",
-                optional_data={"centro_id": centro_id},
-            )
-            return {"ok": True, "link_pago": f"{result['url']}?token={result['token']}"}
+            link = _generar_link_pago(centro_id, precios["precio_final"], data.get("email_contacto", ""))
+            try:
+                from notifications.email_suscripciones import enviar_link_primer_pago
+                enviar_link_primer_pago(
+                    email_contacto=data.get("email_contacto", ""),
+                    nombre_centro=data.get("nombre_centro", centro_id),
+                    monto=precios["precio_final"],
+                    link_pago=link,
+                    fecha_vencimiento=suscripcion["fecha_vencimiento"],
+                )
+                print(f"[SUPERADMIN] ✅ Email primer pago enviado a {data.get('email_contacto')}")
+            except Exception as e:
+                print(f"[SUPERADMIN] Error email primer pago: {e}")
+            return {"ok": True, "link_pago": link}
         except Exception as e:
             return {"ok": True, "warning": str(e)}
 
     return {"ok": True}
+
+
+@router.delete("/suscripciones/{centro_id}")
+def borrar_suscripcion(centro_id: str):
+    s = get_suscripcion(centro_id)
+    if not s:
+        raise HTTPException(404, "Suscripción no encontrada")
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM suscripciones WHERE centro_id = %s", (centro_id,))
+            conn.commit()
+    return {"ok": True, "deleted": centro_id}
 
 
 @router.patch("/suscripciones/{centro_id}/estado")
@@ -156,19 +170,32 @@ def cobrar_suscripcion(centro_id: str):
     s = get_suscripcion(centro_id)
     if not s:
         raise HTTPException(404, "Suscripción no encontrada")
+
+    # Verificar descuento vencido
+    precio_final = s["precio_final"]
+    if s.get("descuento_hasta") and date.today().isoformat() > s["descuento_hasta"]:
+        precio_final = s["precio_base"]
+        update_suscripcion(centro_id, {
+            "descuento_pct": 0, "descuento_motivo": "",
+            "descuento_hasta": None, "precio_final": precio_final
+        })
+
     try:
-        from modules.pagos.flow_client import crear_pago
-        mes    = date.today().strftime("%Y-%m")
-        result = crear_pago(
-            id_pago=f"SUB-{centro_id}-{mes}",
-            amount=s["precio_final"],
-            subject=f"Suscripción {s['nombre_centro']} — {mes}",
-            email=s["email_contacto"],
-            url_confirmation=f"{BACKEND_URL}/api/suscripciones/webhook/pago",
-            url_return=f"{FRONTEND_URL}/suscripciones",
-            optional_data={"centro_id": centro_id},
-        )
-        return {"ok": True, "link_pago": f"{result['url']}?token={result['token']}"}
+        link = _generar_link_pago(centro_id, precio_final, s["email_contacto"])
+        # Enviar email con link de cobro
+        try:
+            from notifications.email_suscripciones import enviar_recordatorio_renovacion
+            enviar_recordatorio_renovacion(
+                email_contacto=s["email_contacto"],
+                nombre_centro=s["nombre_centro"],
+                monto=precio_final,
+                fecha_vencimiento=s["fecha_vencimiento"],
+                link_pago=link,
+            )
+            print(f"[SUPERADMIN] ✅ Email cobro enviado a {s['email_contacto']}")
+        except Exception as e:
+            print(f"[SUPERADMIN] Error email cobro: {e}")
+        return {"ok": True, "link_pago": link}
     except Exception as e:
         raise HTTPException(500, str(e))
 
@@ -235,3 +262,23 @@ def listar_profesionales():
             cur.execute("SELECT id, name, rut, specialty, active, created_at FROM profesionales ORDER BY name")
             rows = cur.fetchall()
     return [dict(r) for r in rows]
+
+
+# ══════════════════════════════════════════════════════════════
+# HELPERS
+# ══════════════════════════════════════════════════════════════
+
+def _generar_link_pago(centro_id: str, monto: int, email: str) -> str:
+    from modules.pagos.flow_client import crear_pago
+    mes    = date.today().strftime("%Y-%m")
+    result = crear_pago(
+        id_pago=f"SUB-{centro_id}-{mes}",
+        amount=monto,
+        subject=f"Suscripción sistema clínico ICA — {mes}",
+        email=email,
+        url_confirmation=f"{BACKEND_URL}/api/suscripciones/webhook/pago",
+        url_return=f"{FRONTEND_URL}/suscripciones",
+        optional_data={"centro_id": centro_id},
+    )
+    return f"{result['url']}?token={result['token']}"
+    
