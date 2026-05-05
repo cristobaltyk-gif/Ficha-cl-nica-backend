@@ -33,14 +33,12 @@ from admin.users_router                             import router as users_admin
 from modules.fichas.ficha_create                    import router as ficha_create_router
 from modules.fichas.ficha_read                      import router as ficha_read_router
 from modules.fichas.ficha_update                    import router as ficha_update_router
-from api.gpt_clinical                               import router as gpt_clinical_router
 from Documentospdf.pdfRouter                        import router as pdf_router
 from modules.fichas.ficha_evento_create             import router as ficha_evento_create_router
 from modules.fichas.ficha_evento_read               import router as ficha_evento_read_router
 from modules.fichas.ficha_evento_update             import router as ficha_evento_update_router
 from modules.fichas.ficha_evento_list               import router as ficha_evento_list_router
 from modules.fichas.ficha_evento_resumen_clinico    import router as ficha_evento_resumen_clinico_router
-from api.gpt_summary                                import router as gpt_summary_router
 from api.claude_router                              import router as claude_clinical_router
 from api.claude_kine_router                         import router as claude_kine_router
 from modules.caja.caja_router                       import router as caja_router
@@ -55,7 +53,9 @@ from core.sedes_router                              import router as sedes_route
 from core.geo_router                                import router as geo_router
 from modules.control.control_sobrecupo_router       import router as sobrecupo_router
 from modules.caja.caja_config_router                import router as caja_config_router
-from admin.data_map_router                          import router as data_map_router
+from agenda.bloqueo_router                          import router as bloqueo_router
+from modules.suscripciones.suscripcion_router       import router as suscripcion_router
+from modules.superadmin.superadmin_router           import router as superadmin_router
 
 # ==========================
 # APP CORE
@@ -97,8 +97,6 @@ app.include_router(ficha_evento_read_router)
 app.include_router(ficha_evento_update_router)
 app.include_router(ficha_evento_list_router)
 app.include_router(ficha_evento_resumen_clinico_router)
-app.include_router(gpt_clinical_router)
-app.include_router(gpt_summary_router)
 app.include_router(claude_clinical_router)
 app.include_router(claude_kine_router)
 app.include_router(claude_summary_router)
@@ -114,7 +112,9 @@ app.include_router(sedes_router)
 app.include_router(geo_router)
 app.include_router(sobrecupo_router)
 app.include_router(caja_config_router)
-app.include_router(data_map_router)
+app.include_router(bloqueo_router)
+app.include_router(suscripcion_router)
+app.include_router(superadmin_router)
 
 # ==========================
 # HEALTHCHECK
@@ -124,6 +124,6 @@ def root():
     return {
         "status":  "ok",
         "service": "Ficha Clínica Backend",
-        "modules": ["auth", "professionals", "agenda", "caja", "contable", "pagos"]
+        "modules": ["auth", "professionals", "agenda", "caja", "contable", "pagos", "suscripciones", "superadmin"]
     }
     
