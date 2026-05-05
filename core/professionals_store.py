@@ -43,7 +43,6 @@ def add_professional(professional: Dict[str, Any]) -> Dict[str, Any]:
 
     save_profesional(pid, professional)
 
-    # Crear usuario automáticamente
     users    = get_users()
     username = professional.get("username") or pid
 
@@ -73,20 +72,35 @@ def update_professional(pid: str, updates: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def delete_professional(pid: str) -> Dict[str, Any]:
-    prof = get_professional(pid)
-    if not prof:
-        raise ValueError("Profesional no existe")
+    # Buscar por id O por cualquier campo relacionado — sin filtro de active
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT * FROM profesionales 
+                WHERE id = %s
+                   OR id IN (SELECT professional FROM usuarios WHERE id = %s)
+            """, (pid, pid))
+            row = cur.fetchone()
 
-    username = prof.get("username") or pid
+    if not row:
+        # Último intento — borrar directo aunque no exista el registro
+        with _get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM profesionales WHERE id = %s", (pid,))
+                cur.execute("DELETE FROM usuarios WHERE id = %s", (pid,))
+                cur.execute("DELETE FROM sedes WHERE id = %s", (pid,))
+                conn.commit()
+        return {"id": pid, "deleted": True}
+
+    prof     = dict(row)
+    real_pid = prof["id"]
+    username = pid  # el username es el pid que vino del frontend
 
     with _get_conn() as conn:
         with conn.cursor() as cur:
-            # Eliminar profesional
-            cur.execute("DELETE FROM profesionales WHERE id = %s", (pid,))
-            # Eliminar usuario asociado
-            cur.execute("DELETE FROM usuarios WHERE id = %s", (username,))
-            # Eliminar sede
-            cur.execute("DELETE FROM sedes WHERE id = %s", (pid,))
+            cur.execute("DELETE FROM profesionales WHERE id = %s", (real_pid,))
+            cur.execute("DELETE FROM usuarios WHERE id = %s OR professional = %s", (username, real_pid))
+            cur.execute("DELETE FROM sedes WHERE id = %s OR id = %s", (real_pid, username))
             conn.commit()
 
     return prof
