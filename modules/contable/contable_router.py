@@ -139,4 +139,4 @@ def exportar_excel(mes: str, auth=Depends(require_internal_auth)):
     buf=io.BytesIO(); wb.save(buf); buf.seek(0)
     return StreamingResponse(buf,media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition":f"attachment; filename=contable_{mes}.xlsx"})
-                
+    
