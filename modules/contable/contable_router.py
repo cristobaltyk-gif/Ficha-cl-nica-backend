@@ -15,9 +15,29 @@ TIPOS_LABELS  = {"particular":"Particular","control_costo":"Control con costo","
 GRUPOS_LABELS = {"fijos":"Gastos Fijos","variables":"Gastos Variables","cuentas":"Cuentas"}
 
 
-def _resumen_mes(mes: str) -> dict:
+def _get_profesionales_scope(auth: dict) -> list | None:
+    """
+    Retorna lista de professional IDs permitidos según scope.
+    None = sin restricción (scope ica o admin).
+    """
+    scope = (auth.get("role") or {}).get("scope", "ica")
+    if scope == "ica":
+        return None  # ve todo
+    # externo → solo su professional
+    professional = auth.get("professional")
+    if professional and professional != "system":
+        return [professional]
+    return []
+
+
+def _resumen_mes(mes: str, profesionales_permitidos: list | None = None) -> dict:
     pagos  = get_pagos_mes(mes)
     gastos = get_gastos().get(mes, {})
+
+    # Filtrar pagos por scope
+    if profesionales_permitidos is not None:
+        pagos = [p for p in pagos if p.get("professional") in profesionales_permitidos]
+
     ingresos_total=0; anulados_total=0; pago_profesionales=0
     ingresos_detalle=[]; anulados_detalle=[]; profesionales_detalle={}
     for p in pagos:
@@ -41,6 +61,11 @@ def _resumen_mes(mes: str) -> dict:
             profesionales_detalle[prof]["retencion"]+=comision["retencion"]
             profesionales_detalle[prof]["neto"]+=comision["neto"]
             profesionales_detalle[prof]["pagos"]+=1
+
+    # Gastos solo para scope ica — externo no ve gastos del centro
+    if profesionales_permitidos is not None:
+        gastos = {}
+
     gastos_total=0; gastos_detalle=[]; gastos_por_grupo={}
     for grupo, items in gastos.items():
         grupo_total=0
@@ -64,14 +89,16 @@ def _resumen_mes(mes: str) -> dict:
 
 @router.get("/resumen/{mes}")
 def get_resumen(mes: str, auth=Depends(require_internal_auth)):
-    return _resumen_mes(mes)
+    permitidos = _get_profesionales_scope(auth)
+    return _resumen_mes(mes, permitidos)
 
 
 @router.get("/exportar/{mes}")
 def exportar_excel(mes: str, auth=Depends(require_internal_auth)):
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    data=_resumen_mes(mes); wb=Workbook()
+    permitidos = _get_profesionales_scope(auth)
+    data=_resumen_mes(mes, permitidos); wb=Workbook()
     NAVY="0D1B2A";BLUE="1E40AF";GREEN="166534";RED="991B1B";YELLOW="854D0E";PURPLE="5B21B6"
     BG_GRAY="F1F5F9";BG_GREEN="F0FDF4";BG_RED="FEF2F2";BG_BLUE="EFF6FF";BG_YELLOW="FEFCE8";BG_PURPLE="F5F3FF"
     def hf(c=None): return Font(name="Arial",bold=True,color=c or "FFFFFF",size=11)
@@ -94,7 +121,7 @@ def exportar_excel(mes: str, auth=Depends(require_internal_auth)):
         c1=ws.cell(row=5,column=col,value=label); c1.font=Font(name="Arial",size=9,bold=True,color="64748B")
         c1.alignment=Alignment(horizontal="center"); c1.fill=fill(bg); c1.border=brd()
         c2=ws.cell(row=6,column=col,value=valor); c2.font=Font(name="Arial",size=14,bold=True,color=color)
-        c2.alignment=ctr(); c2.fill=fill(bg); c2.number_format="$#,##0;($#,##0);\"-\""; c2.border=brd()
+        c2.alignment=ctr(); c2.fill=fill(bg); c2.number_format="$#,##0;($#,##0);"-""; c2.border=brd()
     for col,w in zip("ABCDE",[32,10,18,18,18]): ws.column_dimensions[col].width=w
     ws2=wb.create_sheet("Ingresos"); ws2.sheet_view.showGridLines=False
     ws2.merge_cells("A1:I1"); ws2["A1"]=f"Ingresos — {mes}"
@@ -105,9 +132,9 @@ def exportar_excel(mes: str, auth=Depends(require_internal_auth)):
         rn=i+3; bg="FFFFFF" if i%2==0 else BG_GRAY
         for j,v in enumerate([ing["fecha"],ing["time"],ing["rut"],ing["tipo"],ing["professional"],ing["metodo"],ing["monto"],ing["retencion"],ing["neto"]]):
             c=ws2.cell(row=rn,column=j+1,value=v); c.font=cf(); c.fill=fill(bg); c.border=brd()
-            if j==6: c.number_format="$#,##0;($#,##0);\"-\""; c.font=cf(bold=True,color=GREEN)
-            if j==7: c.number_format="$#,##0;($#,##0);\"-\""; c.font=cf(bold=True,color=BLUE)
-            if j==8: c.number_format="$#,##0;($#,##0);\"-\""; c.font=cf(bold=True,color=PURPLE)
+            if j==6: c.number_format="$#,##0;($#,##0);"-""; c.font=cf(bold=True,color=GREEN)
+            if j==7: c.number_format="$#,##0;($#,##0);"-""; c.font=cf(bold=True,color=BLUE)
+            if j==8: c.number_format="$#,##0;($#,##0);"-""; c.font=cf(bold=True,color=PURPLE)
     for col,w in zip("ABCDEFGHI",[12,8,14,20,16,14,14,14,14]): ws2.column_dimensions[col].width=w
     buf=io.BytesIO(); wb.save(buf); buf.seek(0)
     return StreamingResponse(buf,media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
