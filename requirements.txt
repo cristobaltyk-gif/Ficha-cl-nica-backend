@@ -65,3 +65,4 @@ python-multipart
 # Backup → Cloudflare R2
 # =========================
 boto3
+schedule
