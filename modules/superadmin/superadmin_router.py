@@ -145,6 +145,49 @@ def borrar_suscripcion(centro_id: str):
     return {"ok": True, "deleted": centro_id}
 
 
+@router.patch("/suscripciones/{centro_id}/roles")
+def modificar_roles(centro_id: str, data: dict):
+    """Modifica los roles/cantidad de una suscripción y recalcula el precio."""
+    s = get_suscripcion(centro_id)
+    if not s:
+        raise HTTPException(404, "Suscripción no encontrada")
+
+    roles    = data.get("roles", s.get("roles", {}))
+    desc_pct = s.get("descuento_pct", 0)
+
+    if s.get("plan") == "centro":
+        precios = calcular_precio_centro(roles, desc_pct)
+    else:
+        precio_base = PRECIOS_EXTERNO.get(s["plan"], 35000)
+        precios = {
+            "precio_base":  precio_base,
+            "precio_final": precio_base - int(precio_base * desc_pct / 100),
+        }
+
+    update_suscripcion(centro_id, {
+        "roles":       roles,
+        "precio_base": precios["precio_base"],
+        "precio_final":precios["precio_final"],
+    })
+
+    # Actualizar también en tabla centros si existe
+    try:
+        from db.supabase_client import get_centro, save_centro
+        centro = get_centro(centro_id)
+        if centro:
+            centro["max_usuarios"] = roles
+            save_centro(centro)
+    except Exception as e:
+        print(f"[SUPERADMIN] Error actualizando centro: {e}")
+
+    return {
+        "ok":          True,
+        "roles":       roles,
+        "precio_base": precios["precio_base"],
+        "precio_final":precios["precio_final"],
+    }
+
+
 @router.patch("/suscripciones/{centro_id}/estado")
 def cambiar_estado(centro_id: str, data: dict):
     estado = data.get("estado")
@@ -281,4 +324,3 @@ def _generar_link_pago(centro_id: str, monto: int, email: str) -> str:
         optional_data={"centro_id": centro_id},
     )
     return f"{result['url']}?token={result['token']}"
-    
