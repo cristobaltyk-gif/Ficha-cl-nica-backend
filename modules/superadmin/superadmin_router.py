@@ -145,6 +145,39 @@ def borrar_suscripcion(centro_id: str):
     return {"ok": True, "deleted": centro_id}
 
 
+@router.patch("/suscripciones/{centro_id}")
+def modificar_suscripcion(centro_id: str, data: dict):
+    """Modifica cualquier campo de la suscripción — superadmin tiene control total."""
+    s = get_suscripcion(centro_id)
+    if not s:
+        raise HTTPException(404, "Suscripción no encontrada")
+
+    # Si cambian roles → recalcular precio
+    if "roles" in data and s.get("plan") == "centro":
+        roles    = data["roles"]
+        desc_pct = data.get("descuento_pct", s.get("descuento_pct", 0))
+        precios  = calcular_precio_centro(roles, desc_pct)
+        data["precio_base"]  = precios["precio_base"]
+        data["precio_final"] = precios["precio_final"]
+        # Actualizar tabla centros
+        try:
+            from db.supabase_client import get_centro, save_centro
+            centro = get_centro(centro_id)
+            if centro:
+                centro["max_usuarios"] = roles
+                save_centro(centro)
+        except Exception as e:
+            print(f"[SUPERADMIN] Error actualizando centro: {e}")
+
+    # Si cambian descuento_pct sin cambiar roles → recalcular precio
+    elif "descuento_pct" in data and "roles" not in data:
+        desc_pct = data["descuento_pct"]
+        data["precio_final"] = int(s["precio_base"] * (1 - desc_pct / 100))
+
+    update_suscripcion(centro_id, data)
+    return {"ok": True, **data}
+
+
 @router.patch("/suscripciones/{centro_id}/roles")
 def modificar_roles(centro_id: str, data: dict):
     """Modifica los roles/cantidad de una suscripción y recalcula el precio."""
@@ -324,3 +357,4 @@ def _generar_link_pago(centro_id: str, monto: int, email: str) -> str:
         optional_data={"centro_id": centro_id},
     )
     return f"{result['url']}?token={result['token']}"
+    
