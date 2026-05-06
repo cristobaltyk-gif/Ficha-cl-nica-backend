@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from typing import Dict, Optional
 
 from auth.superadmin_auth import require_superadmin
+from auth.internal_auth import require_internal_auth
 from db.supabase_client import (
     get_centros, get_centro, save_centro,
     delete_centro, get_usuarios_centro
@@ -20,21 +21,14 @@ router = APIRouter(
     dependencies=[Depends(require_superadmin)]
 )
 
-PRECIOS_ROL = {
-    "medico":     30000,
-    "kine":       25000,
-    "psicologo":  30000,
-    "secretaria": 20000,
-    "admin":      20000,
-}
 
 
 class CrearCentroRequest(BaseModel):
-    id:              str   # scope del centro ej: "ica", "traumamaule"
+    id:              str
     nombre:          str
     email_contacto:  str
     plan:            str = "centro"
-    max_usuarios:    Dict[str, int] = {}  # {"medico": 2, "kine": 1}
+    max_usuarios:    Dict[str, int] = {}
 
 
 class ActualizarCentroRequest(BaseModel):
@@ -44,132 +38,75 @@ class ActualizarCentroRequest(BaseModel):
     max_usuarios:   Optional[Dict[str, int]] = None
 
 
-# ══════════════════════════════════════════════════════════════
-# LISTAR
-# ══════════════════════════════════════════════════════════════
-
 @router.get("")
 def listar_centros():
     centros = get_centros()
-    # Enriquecer con conteo de usuarios y precio
     result = []
     for c in centros:
-        usuarios   = get_usuarios_centro(c["id"])
-        max_u      = c.get("max_usuarios") or {}
-        precio_base = sum(
-            PRECIOS_ROL.get(rol, 0) * qty
-            for rol, qty in max_u.items()
-        )
-        result.append({
-            **c,
-            "total_usuarios": len(usuarios),
-            "precio_base":    precio_base,
-        })
+        usuarios    = get_usuarios_centro(c["id"])
+        result.append({ **c, "total_usuarios": len(usuarios) })
     return result
 
-
-# ══════════════════════════════════════════════════════════════
-# DETALLE
-# ══════════════════════════════════════════════════════════════
 
 @router.get("/{centro_id}")
 def detalle_centro(centro_id: str):
     centro = get_centro(centro_id)
     if not centro:
         raise HTTPException(404, "Centro no encontrado")
-    usuarios = get_usuarios_centro(centro_id)
-    return { **centro, "usuarios": usuarios }
+    return { **centro, "usuarios": get_usuarios_centro(centro_id) }
 
-
-# ══════════════════════════════════════════════════════════════
-# CREAR
-# ══════════════════════════════════════════════════════════════
 
 @router.post("")
 def crear_centro(data: CrearCentroRequest):
     if get_centro(data.id):
         raise HTTPException(409, f"Centro '{data.id}' ya existe")
-
     save_centro({
-        "id":             data.id,
-        "nombre":         data.nombre,
-        "email_contacto": data.email_contacto,
-        "activo":         True,
-        "plan":           data.plan,
-        "max_usuarios":   data.max_usuarios,
+        "id": data.id, "nombre": data.nombre,
+        "email_contacto": data.email_contacto, "activo": True,
+        "plan": data.plan, "max_usuarios": data.max_usuarios,
     })
     return {"ok": True, "id": data.id}
 
-
-# ══════════════════════════════════════════════════════════════
-# ACTUALIZAR
-# ══════════════════════════════════════════════════════════════
 
 @router.patch("/{centro_id}")
 def actualizar_centro(centro_id: str, data: ActualizarCentroRequest):
     centro = get_centro(centro_id)
     if not centro:
         raise HTTPException(404, "Centro no encontrado")
-
-    updates = data.dict(exclude_none=True)
-    centro.update(updates)
+    centro.update(data.dict(exclude_none=True))
     save_centro(centro)
     return {"ok": True}
 
 
-# ══════════════════════════════════════════════════════════════
-# BORRAR
-# ══════════════════════════════════════════════════════════════
-
 @router.delete("/{centro_id}")
 def borrar_centro(centro_id: str):
-    centro = get_centro(centro_id)
-    if not centro:
+    if not get_centro(centro_id):
         raise HTTPException(404, "Centro no encontrado")
-
     delete_centro(centro_id)
     return {"ok": True, "deleted": centro_id}
 
 
-# ══════════════════════════════════════════════════════════════
-# USUARIOS DEL CENTRO
-# ══════════════════════════════════════════════════════════════
-
 @router.get("/{centro_id}/usuarios")
 def usuarios_centro(centro_id: str):
-    centro = get_centro(centro_id)
-    if not centro:
+    if not get_centro(centro_id):
         raise HTTPException(404, "Centro no encontrado")
     return get_usuarios_centro(centro_id)
 
 
-@router.get("/{centro_id}/capacidad")
-def capacidad_centro(centro_id: str):
-    """Muestra cuántos usuarios tiene vs cuántos puede tener."""
+@router.get("/{centro_id}/capacidad", dependencies=[])
+def capacidad_centro(centro_id: str, auth=Depends(require_internal_auth)):
     centro = get_centro(centro_id)
     if not centro:
         raise HTTPException(404, "Centro no encontrado")
-
     max_u    = centro.get("max_usuarios") or {}
     usuarios = get_usuarios_centro(centro_id)
-
-    # Contar por rol
-    conteo = {}
+    conteo   = {}
     for u in usuarios:
         rol = (u.get("role") or {}).get("name", "otro")
         conteo[rol] = conteo.get(rol, 0) + 1
-
-    capacidad = {}
-    for rol, maximo in max_u.items():
-        capacidad[rol] = {
-            "maximo":    maximo,
-            "actual":    conteo.get(rol, 0),
-            "disponible":maximo - conteo.get(rol, 0),
-        }
-
-    return {
-        "centro_id": centro_id,
-        "nombre":    centro["nombre"],
-        "capacidad": capacidad,
-        "total_usuarios": len(usuarios),
+    capacidad = {
+        rol: {"maximo": maximo, "actual": conteo.get(rol, 0), "disponible": maximo - conteo.get(rol, 0)}
+        for rol, maximo in max_u.items()
     }
+    return {"centro_id": centro_id, "nombre": centro["nombre"], "capacidad": capacidad, "total_usuarios": len(usuarios)}
+    
