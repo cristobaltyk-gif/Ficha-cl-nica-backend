@@ -297,13 +297,12 @@ def enviar_credenciales_externo(
     </div>
     """
     try:
-        resend.Emails.send({{
+        resend.Emails.send({
             "from":    FROM_EMAIL,
             "to":      [email_contacto],
-            "subject": f"ICA — Acceso activado · Bienvenido/a {{nombre}}",
+            "subject": f"ICA — Acceso activado · Bienvenido/a {nombre}",
             "html":    html
-        }})
+        })
         return True
     except Exception as e:
-        print(f"❌ ERROR EMAIL credenciales externo: {{e}}"); return False
-    
+        print(f"❌ ERROR EMAIL credenciales externo: {e}"); return False
