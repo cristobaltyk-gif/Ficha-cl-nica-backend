@@ -58,22 +58,33 @@ async def webhook_pago(request: Request):
     })
     print(f"[WEBHOOK] ✅ Suscripción {centro_id} activada hasta {nueva_fecha}")
 
-    # Si es primer pago → crear usuario admin y enviar credenciales
+    # Si es primer pago → crear usuario y enviar credenciales según plan
     if es_primer_pago:
         try:
-            username_admin, password_temp = _crear_usuario_admin_centro(centro_id, s)
-            from notifications.email_suscripciones import enviar_credenciales_acceso
-            enviar_credenciales_acceso(
-                email_contacto=s["email_contacto"],
-                nombre_centro=s["nombre_centro"],
-                username_admin=username_admin,
-                password_temp=password_temp,
-                plan=s["plan"],
-                max_usuarios=s.get("roles", {}),
-            )
+            username, password_temp = _crear_usuario_admin_centro(centro_id, s)
+            plan = s.get("plan", "centro")
+            if plan == "centro":
+                from notifications.email_suscripciones import enviar_credenciales_acceso
+                enviar_credenciales_acceso(
+                    email_contacto=s["email_contacto"],
+                    nombre_centro=s["nombre_centro"],
+                    username_admin=username,
+                    password_temp=password_temp,
+                    plan=plan,
+                    max_usuarios=s.get("roles", {}),
+                )
+            else:
+                from notifications.email_suscripciones import enviar_credenciales_externo
+                enviar_credenciales_externo(
+                    email_contacto=s["email_contacto"],
+                    nombre=s["nombre_centro"],
+                    username=username,
+                    password_temp=password_temp,
+                    plan=plan,
+                )
             print(f"[WEBHOOK] ✅ Credenciales enviadas a {s['email_contacto']}")
         except Exception as e:
-            print(f"[WEBHOOK] Error creando usuario admin: {e}")
+            print(f"[WEBHOOK] Error creando usuario: {e}")
 
     return {"ok": True}
 
@@ -123,3 +134,4 @@ def _crear_usuario_admin_centro(centro_id: str, s: dict) -> tuple[str, str]:
         save_user(username, users[username])
 
     return username, password
+    
