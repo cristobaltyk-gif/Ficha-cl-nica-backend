@@ -241,4 +241,69 @@ def enviar_aviso_suspension(
         return True
     except Exception as e:
         print(f"❌ ERROR EMAIL suspensión: {e}"); return False
+
+
+# ══════════════════════════════════════════════════════════════
+# 5. CREDENCIALES EXTERNO — acceso individual
+# ══════════════════════════════════════════════════════════════
+
+def enviar_credenciales_externo(
+    *,
+    email_contacto: str,
+    nombre:         str,
+    username:       str,
+    password_temp:  str,
+    plan:           str,
+) -> bool:
+    _init()
+    planes = {
+        "externo_base":     "Externo Base — acceso a sus propios pacientes",
+        "externo_completo": "Externo Completo — acceso completo + contabilidad",
+    }
+    plan_label = planes.get(plan, plan)
+
+    html = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; background: #fff;">
+        <img src="{LOGO_URL}" alt="ICA" style="height: 60px; margin-bottom: 24px;" />
+        <h2 style="color: #166534;">✅ Pago confirmado — Acceso activado</h2>
+        <p>Estimado/a <strong>{nombre}</strong>,</p>
+        <p>Su pago ha sido confirmado. A continuación sus credenciales de acceso al sistema clínico:</p>
+
+        <div style="background: #f0fdf4; border: 1px solid #86efac; border-radius: 8px;
+                    padding: 20px; margin: 20px 0;">
+            <p style="margin: 0 0 8px; font-size: 13px; color: #475569;">URL de acceso:</p>
+            <p style="margin: 0 0 16px;">
+                <a href="{CLINICA_URL}" style="color: #1e3a8a; font-weight: bold;">{CLINICA_URL}</a>
+            </p>
+            <p style="margin: 0 0 8px; font-size: 13px; color: #475569;">Usuario:</p>
+            <p style="margin: 0 0 16px; font-size: 18px; font-weight: 800; color: #0f172a; letter-spacing: 1px;">{username}</p>
+            <p style="margin: 0 0 8px; font-size: 13px; color: #475569;">Contraseña temporal:</p>
+            <p style="margin: 0; font-size: 18px; font-weight: 800; color: #0f172a; letter-spacing: 2px;">{password_temp}</p>
+        </div>
+
+        <p style="color: #dc2626; font-weight: 600; font-size: 13px;">
+            ⚠️ Por seguridad, cambie su contraseña al ingresar por primera vez.
+        </p>
+
+        <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px;
+                    padding: 14px; margin: 16px 0; font-size: 13px; color: #1e40af;">
+            <strong>Plan activo:</strong> {plan_label}
+        </div>
+
+        <p style="color: #64748b; font-size: 12px; margin-top: 24px;">
+            Cualquier consulta: contacto@icarticular.cl<br/>
+            Instituto de Cirugía Articular — Curicó, Chile
+        </p>
+    </div>
+    """
+    try:
+        resend.Emails.send({{
+            "from":    FROM_EMAIL,
+            "to":      [email_contacto],
+            "subject": f"ICA — Acceso activado · Bienvenido/a {{nombre}}",
+            "html":    html
+        }})
+        return True
+    except Exception as e:
+        print(f"❌ ERROR EMAIL credenciales externo: {{e}}"); return False
     
