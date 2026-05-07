@@ -99,7 +99,7 @@ def crear_suscripcion(data: dict):
         "descuento_motivo":    data.get("descuento_motivo", ""),
         "descuento_hasta":     data.get("descuento_hasta"),
         "precio_final":        precios["precio_final"],
-        "estado":              "activo",
+        "estado":              "pendiente_pago",
         "fecha_inicio":        hoy.isoformat(),
         "fecha_vencimiento":   (hoy + timedelta(days=30)).isoformat(),
         "email_contacto":      data.get("email_contacto", ""),
