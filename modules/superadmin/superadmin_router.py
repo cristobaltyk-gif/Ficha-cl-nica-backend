@@ -177,8 +177,9 @@ def modificar_roles(centro_id: str, data: dict):
             "precio_final": precio_base - int(precio_base * desc_pct / 100),
         }
 
+    import json as _json
     update_suscripcion(centro_id, {
-        "roles":       roles,
+        "roles":       _json.dumps(roles) if isinstance(roles, dict) else roles,
         "precio_base": precios["precio_base"],
         "precio_final":precios["precio_final"],
     })
@@ -249,8 +250,13 @@ def modificar_suscripcion(centro_id: str, data: dict):
         desc_pct = data["descuento_pct"]
         data["precio_final"] = int(s["precio_base"] * (1 - desc_pct / 100))
 
+    import json
+    # Serializar campos dict para PostgreSQL
+    if "roles" in data and isinstance(data["roles"], dict):
+        data["roles"] = json.dumps(data["roles"])
+
     update_suscripcion(centro_id, data)
-    return {"ok": True, **data}
+    return {"ok": True}
 
 @router.post("/suscripciones/{centro_id}/cobrar")
 def cobrar_suscripcion(centro_id: str):
