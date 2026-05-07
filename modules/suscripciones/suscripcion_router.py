@@ -83,31 +83,43 @@ async def webhook_pago(request: Request):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _crear_usuario_admin_centro(centro_id: str, s: dict) -> tuple[str, str]:
-    """Crea el usuario admin del centro con clave temporal."""
+    """Crea usuario admin (centro) o usuario externo según el plan."""
     from db.supabase_client import get_users, save_user
 
-    username = f"admin_{centro_id}"
-    password = secrets.token_urlsafe(10)
+    plan = s.get("plan", "centro")
 
-    users = get_users()
+    if plan == "centro":
+        username = f"admin_{centro_id}"
+        role = {
+            "name":  "admin",
+            "entry": "/admin",
+            "allow": ["agenda", "pacientes", "atencion", "documentos", "administracion"],
+            "scope": centro_id,
+        }
+    else:
+        # Externo — usuario con scope externo, solo sus propios pacientes
+        username = centro_id
+        role = {
+            "name":  "medico",
+            "entry": "/medico",
+            "allow": ["agenda", "pacientes", "atencion", "documentos"],
+            "scope": "externo",
+        }
+
+    password = secrets.token_urlsafe(10)
+    users    = get_users()
+
     if username not in users:
         save_user(username, {
             "password":     password,
             "active":       True,
-            "professional": "system",
-            "role": {
-                "name":  "admin",
-                "entry": "/admin",
-                "allow": ["agenda", "pacientes", "atencion", "documentos", "administracion"],
-                "scope": centro_id,
-            }
+            "professional": centro_id,
+            "role":         role,
         })
-        print(f"[WEBHOOK] Usuario admin creado: {username}")
+        print(f"[WEBHOOK] Usuario creado: {username} — plan: {plan}")
     else:
-        # Ya existe — regenerar clave
         password = secrets.token_urlsafe(10)
         users[username]["password"] = password
         save_user(username, users[username])
 
     return username, password
-    
