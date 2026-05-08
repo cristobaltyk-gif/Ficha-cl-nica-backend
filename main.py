@@ -9,6 +9,12 @@ from init_data import init_disk_data
 init_disk_data()
 
 # ==========================
+# INICIALIZACIÓN BD
+# ==========================
+from db.supabase_client import init_db
+init_db()
+
+# ==========================
 # SCHEDULER
 # ==========================
 from modules.pagos.scheduler import start_scheduler
