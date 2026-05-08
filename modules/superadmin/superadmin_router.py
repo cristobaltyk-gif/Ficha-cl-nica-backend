@@ -129,7 +129,6 @@ def crear_suscripcion(data: dict):
             return {"ok": True, "link_pago": link}
         except Exception as e:
             print(f"[SUPERADMIN] ❌ Error generando link Flow: {e}")
-            # Intentar enviar email sin link si hay email
             try:
                 from notifications.email_suscripciones import enviar_link_primer_pago
                 enviar_link_primer_pago(
@@ -160,7 +159,6 @@ def borrar_suscripcion(centro_id: str):
 
 @router.patch("/suscripciones/{centro_id}/roles")
 def modificar_roles(centro_id: str, data: dict):
-    """Modifica los roles/cantidad de una suscripción y recalcula el precio."""
     s = get_suscripcion(centro_id)
     if not s:
         raise HTTPException(404, "Suscripción no encontrada")
@@ -184,7 +182,6 @@ def modificar_roles(centro_id: str, data: dict):
         "precio_final":precios["precio_final"],
     })
 
-    # Actualizar también en tabla centros si existe
     try:
         from db.supabase_client import get_centro, save_centro
         centro = get_centro(centro_id)
@@ -222,8 +219,6 @@ def aplicar_descuento(centro_id: str, data: dict):
     return {"ok": True}
 
 
-
-
 @router.patch("/suscripciones/{centro_id}")
 def modificar_suscripcion(centro_id: str, data: dict):
     """Modifica cualquier campo de la suscripción — superadmin tiene control total."""
@@ -251,12 +246,41 @@ def modificar_suscripcion(centro_id: str, data: dict):
         data["precio_final"] = int(s["precio_base"] * (1 - desc_pct / 100))
 
     import json
-    # Serializar campos dict para PostgreSQL
     if "roles" in data and isinstance(data["roles"], dict):
         data["roles"] = json.dumps(data["roles"])
 
     update_suscripcion(centro_id, data)
+
+    # Enviar email de actualización si hay email y cambió algo relevante
+    campos_relevantes = {"roles", "precio_final", "fecha_vencimiento", "descuento_pct", "estado"}
+    if campos_relevantes & set(data.keys()):
+        try:
+            s_actualizada = get_suscripcion(centro_id)
+            email = s_actualizada.get("email_contacto") or s.get("email_contacto")
+            if email:
+                precio_final     = s_actualizada.get("precio_final", 0)
+                fecha_vencimiento = s_actualizada.get("fecha_vencimiento", "")
+                nombre_centro    = s_actualizada.get("nombre_centro", centro_id)
+                # Generar link de pago — si falla, se envía sin link
+                link = ""
+                try:
+                    link = _generar_link_pago(centro_id, precio_final, email)
+                except Exception as e:
+                    print(f"[SUPERADMIN] Error generando link pago en edición: {e}")
+                from notifications.email_suscripciones import enviar_recordatorio_renovacion
+                enviar_recordatorio_renovacion(
+                    email_contacto=email,
+                    nombre_centro=nombre_centro,
+                    monto=precio_final,
+                    fecha_vencimiento=fecha_vencimiento,
+                    link_pago=link or "Contacte a contacto@icarticular.cl",
+                )
+                print(f"[SUPERADMIN] ✅ Email actualización enviado a {email}")
+        except Exception as e:
+            print(f"[SUPERADMIN] Error email edición: {e}")
+
     return {"ok": True}
+
 
 @router.post("/suscripciones/{centro_id}/cobrar")
 def cobrar_suscripcion(centro_id: str):
@@ -264,7 +288,6 @@ def cobrar_suscripcion(centro_id: str):
     if not s:
         raise HTTPException(404, "Suscripción no encontrada")
 
-    # Verificar descuento vencido
     precio_final = s["precio_final"]
     if s.get("descuento_hasta") and date.today().isoformat() > s["descuento_hasta"]:
         precio_final = s["precio_base"]
@@ -275,7 +298,6 @@ def cobrar_suscripcion(centro_id: str):
 
     try:
         link = _generar_link_pago(centro_id, precio_final, s["email_contacto"])
-        # Enviar email con link de cobro
         try:
             from notifications.email_suscripciones import enviar_recordatorio_renovacion
             enviar_recordatorio_renovacion(
@@ -374,4 +396,3 @@ def _generar_link_pago(centro_id: str, monto: int, email: str) -> str:
         optional_data={"centro_id": centro_id},
     )
     return f"{result['url']}?token={result['token']}"
-    
