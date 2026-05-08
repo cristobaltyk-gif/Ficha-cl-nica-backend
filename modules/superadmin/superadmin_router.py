@@ -374,3 +374,4 @@ def _generar_link_pago(centro_id: str, monto: int, email: str) -> str:
         optional_data={"centro_id": centro_id},
     )
     return f"{result['url']}?token={result['token']}"
+    
