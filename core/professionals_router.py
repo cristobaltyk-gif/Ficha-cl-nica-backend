@@ -2,16 +2,26 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from core.professionals_store import (
     list_professionals,
     add_professional,
     update_professional,
     delete_professional,
 )
-from db.supabase_client import _get_conn
+from db.supabase_client import _get_conn, get_users
 
 router = APIRouter(prefix="/professionals", tags=["professionals"])
+
+
+def _get_scope(request: Request) -> Optional[str]:
+    """Lee el scope del usuario autenticado desde X-Internal-User."""
+    username = request.headers.get("X-Internal-User")
+    if not username:
+        return None
+    users = get_users()
+    u = users.get(username, {})
+    return (u.get("role") or {}).get("scope")
 
 
 def _load_sedes() -> dict:
@@ -40,8 +50,15 @@ def _filtrar_por_region(professionals: list, region: str) -> list:
 
 
 @router.get("")
-def get_all(public: bool = False, region: Optional[str] = None):
+def get_all(request: Request, public: bool = False, region: Optional[str] = None):
     profs = list_professionals(only_public=public)
+
+    # Filtrar por scope del admin autenticado
+    scope = _get_scope(request)
+    if scope and scope not in ("externo",):
+        profs = [p for p in profs if (p.get("role") or {}).get("scope") == scope
+                 or (p.get("role") is None)]
+
     if region:
         profs = _filtrar_por_region(profs, region)
     return profs
@@ -69,4 +86,3 @@ def remove(pid: str):
         return delete_professional(pid)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-        
