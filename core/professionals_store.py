@@ -1,93 +1,88 @@
-"""
-core/professionals_store.py
----------------------------
-Reemplaza lectura/escritura de /data/professionals.json → Supabase
-Mantiene la misma interfaz para compatibilidad.
-"""
 from __future__ import annotations
 
-import json
-from typing import Dict, Any, List, Optional
-from db.supabase_client import _get_conn, _utc_now, get_profesionales, save_profesional
-from db.supabase_client import get_users, save_user
+from typing import Optional
+
+from fastapi import APIRouter, HTTPException, Request
+from core.professionals_store import (
+    list_professionals,
+    add_professional,
+    update_professional,
+    delete_professional,
+)
+from db.supabase_client import _get_conn, get_users
+
+router = APIRouter(prefix="/professionals", tags=["professionals"])
 
 
-def _es_interno(p: Dict[str, Any]) -> bool:
-    id_str   = str(p.get("id", "")).lower().replace(" ", "_")
-    name_str = str(p.get("name", "")).lower()
-    return (
-        id_str.startswith("ia_") or
-        "prediagnóstico" in name_str or
-        "prediagnostico" in name_str
-    )
+def _get_scope(request: Request) -> Optional[str]:
+    """Lee el scope del usuario autenticado desde X-Internal-User."""
+    username = request.headers.get("X-Internal-User")
+    if not username:
+        return None
+    users = get_users()
+    u = users.get(username, {})
+    return (u.get("role") or {}).get("scope")
 
 
-def list_professionals(only_public: bool = False) -> List[Dict[str, Any]]:
-    profs = list(get_profesionales().values())
-    if only_public:
-        return [p for p in profs if not _es_interno(p)]
+def _load_sedes() -> dict:
+    try:
+        with _get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id, regiones FROM sedes")
+                rows = cur.fetchall()
+                return {row["id"]: {"regiones": row["regiones"]} for row in rows}
+    except Exception:
+        return {}
+
+
+def _filtrar_por_region(professionals: list, region: str) -> list:
+    sedes = _load_sedes()
+    if not sedes:
+        return professionals
+    resultado = []
+    for p in professionals:
+        pid       = p.get("id") or ""
+        sede_prof = sedes.get(pid) or {}
+        regiones  = sede_prof.get("regiones") or {}
+        if region in regiones:
+            resultado.append(p)
+    return resultado if resultado else professionals
+
+
+@router.get("")
+def get_all(request: Request, public: bool = False, region: Optional[str] = None):
+    profs = list_professionals(only_public=public)
+
+    # Filtrar por scope del admin autenticado
+    scope = _get_scope(request)
+    if scope and scope not in ("externo",):
+        profs = [p for p in profs if (p.get("role") or {}).get("scope") == scope
+                 or (p.get("role") is None)]
+
+    if region:
+        profs = _filtrar_por_region(profs, region)
     return profs
 
 
-def get_professional(pid: str) -> Optional[Dict[str, Any]]:
-    return get_profesionales().get(pid)
+@router.post("")
+def create(professional: dict):
+    try:
+        return add_professional(professional)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
-def add_professional(professional: Dict[str, Any]) -> Dict[str, Any]:
-    pid = professional.get("id")
-    if not pid:
-        raise ValueError("Falta campo obligatorio: id")
-
-    if get_professional(pid):
-        raise ValueError("Profesional ya existe")
-
-    save_profesional(pid, professional)
-
-    # Crear usuario automáticamente
-    users    = get_users()
-    username = professional.get("username") or pid
-
-    if username not in users:
-        role = professional.get("role", "medico")
-        save_user(username, {
-            "password":     professional.get("password", "cambiar123"),
-            "role": {
-                "name":  role,
-                "entry": f"/{role}",
-                "allow": ["agenda", "pacientes", "atencion", "documentos"]
-            },
-            "professional": pid,
-            "active":       True
-        })
-
-    return professional
+@router.put("/{pid}")
+def update(pid: str, updates: dict):
+    try:
+        return update_professional(pid, updates)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
-def update_professional(pid: str, updates: Dict[str, Any]) -> Dict[str, Any]:
-    prof = get_professional(pid)
-    if not prof:
-        raise ValueError("Profesional no existe")
-    prof.update(updates)
-    save_profesional(pid, prof)
-    return prof
-
-
-def delete_professional(pid: str) -> Dict[str, Any]:
-    prof = get_professional(pid)
-    if not prof:
-        raise ValueError("Profesional no existe")
-
-    username = prof.get("username") or pid
-
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            # Eliminar profesional
-            cur.execute("DELETE FROM profesionales WHERE id = %s", (pid,))
-            # Eliminar usuario asociado
-            cur.execute("DELETE FROM usuarios WHERE id = %s", (username,))
-            # Eliminar sede
-            cur.execute("DELETE FROM sedes WHERE id = %s", (pid,))
-            conn.commit()
-
-    return prof
-            
+@router.delete("/{pid}")
+def remove(pid: str):
+    try:
+        return delete_professional(pid)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
