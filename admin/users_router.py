@@ -1,15 +1,31 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from auth.users_store import load_users, save_users
-from db.supabase_client import _get_conn
+from db.supabase_client import _get_conn, get_users
+
 
 router = APIRouter(prefix="/admin/users", tags=["admin-users"])
 
 
+def _get_scope(request: Request):
+    """Lee el scope del usuario autenticado desde X-Internal-User."""
+    username = request.headers.get("X-Internal-User")
+    if not username:
+        return None
+    users = get_users()
+    u = users.get(username, {})
+    return (u.get("role") or {}).get("scope")
+
+
 @router.get("")
-def list_users():
+def list_users(request: Request):
+    scope = _get_scope(request)
     users = load_users()
     result = []
     for username, u in users.items():
+        user_scope = (u.get("role") or {}).get("scope")
+        # Si hay scope autenticado → solo mostrar usuarios del mismo scope
+        if scope and user_scope != scope:
+            continue
         result.append({
             "username":     username,
             "role":         u.get("role"),
@@ -104,7 +120,6 @@ def delete_user(username: str):
     del users[username]
     save_users(users)
 
-    # Borrar también de profesionales y sedes si existe ahí
     try:
         with _get_conn() as conn:
             with conn.cursor() as cur:
@@ -115,4 +130,3 @@ def delete_user(username: str):
         pass
 
     return {"ok": True}
-    
