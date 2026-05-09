@@ -5,7 +5,7 @@ Protegidos por API key — no por usuarios de BD.
 """
 from __future__ import annotations
 
-import os
+import os, json
 from datetime import date, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query
 from auth.superadmin_auth import require_superadmin
@@ -19,6 +19,8 @@ from db.supabase_client import (
     PRECIOS_EXTERNO,
     get_users,
     save_user,
+    get_centro,
+    save_centro,
 )
 
 router = APIRouter(
@@ -110,6 +112,21 @@ def crear_suscripcion(data: dict):
 
     save_suscripcion(suscripcion)
 
+    # Si es plan centro → grabar también en tabla centros
+    if plan == "centro":
+        try:
+            save_centro({
+                "id":             centro_id,
+                "nombre":         data.get("nombre_centro", centro_id),
+                "email_contacto": data.get("email_contacto", ""),
+                "activo":         True,
+                "plan":           plan,
+                "max_usuarios":   roles,
+            })
+            print(f"[SUPERADMIN] ✅ Centro '{centro_id}' grabado en tabla centros")
+        except Exception as e:
+            print(f"[SUPERADMIN] Error grabando centro: {e}")
+
     # Generar link de pago y enviar email
     if precios["precio_final"] > 0 and data.get("email_contacto"):
         try:
@@ -175,21 +192,21 @@ def modificar_roles(centro_id: str, data: dict):
             "precio_final": precio_base - int(precio_base * desc_pct / 100),
         }
 
-    import json as _json
     update_suscripcion(centro_id, {
-        "roles":       _json.dumps(roles) if isinstance(roles, dict) else roles,
+        "roles":       json.dumps(roles) if isinstance(roles, dict) else roles,
         "precio_base": precios["precio_base"],
         "precio_final":precios["precio_final"],
     })
 
-    try:
-        from db.supabase_client import get_centro, save_centro
-        centro = get_centro(centro_id)
-        if centro:
-            centro["max_usuarios"] = roles
-            save_centro(centro)
-    except Exception as e:
-        print(f"[SUPERADMIN] Error actualizando centro: {e}")
+    # Sincronizar tabla centros si es plan centro
+    if s.get("plan") == "centro":
+        try:
+            centro = get_centro(centro_id)
+            if centro:
+                centro["max_usuarios"] = roles
+                save_centro(centro)
+        except Exception as e:
+            print(f"[SUPERADMIN] Error actualizando centro: {e}")
 
     return {
         "ok":          True,
@@ -205,6 +222,14 @@ def cambiar_estado(centro_id: str, data: dict):
     if estado not in ("activo", "vencido", "suspendido"):
         raise HTTPException(400, "Estado inválido")
     update_suscripcion(centro_id, {"estado": estado})
+    # Sincronizar activo/inactivo en tabla centros
+    try:
+        centro = get_centro(centro_id)
+        if centro:
+            centro["activo"] = (estado == "activo")
+            save_centro(centro)
+    except Exception as e:
+        print(f"[SUPERADMIN] Error sincronizando estado centro: {e}")
     return {"ok": True}
 
 
@@ -233,8 +258,8 @@ def modificar_suscripcion(centro_id: str, data: dict):
         precios  = calcular_precio_centro(roles, desc_pct)
         data["precio_base"]  = precios["precio_base"]
         data["precio_final"] = precios["precio_final"]
+        # Sincronizar tabla centros
         try:
-            from db.supabase_client import get_centro, save_centro
             centro = get_centro(centro_id)
             if centro:
                 centro["max_usuarios"] = roles
@@ -245,34 +270,29 @@ def modificar_suscripcion(centro_id: str, data: dict):
         desc_pct = data["descuento_pct"]
         data["precio_final"] = int(s["precio_base"] * (1 - desc_pct / 100))
 
-    import json
     if "roles" in data and isinstance(data["roles"], dict):
         data["roles"] = json.dumps(data["roles"])
 
     update_suscripcion(centro_id, data)
 
-    # Enviar email de actualización si hay email y cambió algo relevante
+    # Enviar email si cambió algo relevante
     campos_relevantes = {"roles", "precio_final", "fecha_vencimiento", "descuento_pct", "estado"}
     if campos_relevantes & set(data.keys()):
         try:
-            s_actualizada = get_suscripcion(centro_id)
-            email = s_actualizada.get("email_contacto") or s.get("email_contacto")
+            s_act  = get_suscripcion(centro_id)
+            email  = s_act.get("email_contacto") or s.get("email_contacto")
             if email:
-                precio_final     = s_actualizada.get("precio_final", 0)
-                fecha_vencimiento = s_actualizada.get("fecha_vencimiento", "")
-                nombre_centro    = s_actualizada.get("nombre_centro", centro_id)
-                # Generar link de pago — si falla, se envía sin link
                 link = ""
                 try:
-                    link = _generar_link_pago(centro_id, precio_final, email)
+                    link = _generar_link_pago(centro_id, s_act.get("precio_final", 0), email)
                 except Exception as e:
-                    print(f"[SUPERADMIN] Error generando link pago en edición: {e}")
+                    print(f"[SUPERADMIN] Error generando link en edición: {e}")
                 from notifications.email_suscripciones import enviar_recordatorio_renovacion
                 enviar_recordatorio_renovacion(
                     email_contacto=email,
-                    nombre_centro=nombre_centro,
-                    monto=precio_final,
-                    fecha_vencimiento=fecha_vencimiento,
+                    nombre_centro=s_act.get("nombre_centro", centro_id),
+                    monto=s_act.get("precio_final", 0),
+                    fecha_vencimiento=s_act.get("fecha_vencimiento", ""),
                     link_pago=link or "Contacte a contacto@icarticular.cl",
                 )
                 print(f"[SUPERADMIN] ✅ Email actualización enviado a {email}")
