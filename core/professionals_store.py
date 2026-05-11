@@ -43,21 +43,35 @@ def add_professional(professional: Dict[str, Any]) -> Dict[str, Any]:
 
     save_profesional(pid, professional)
 
-    # Crear usuario automáticamente
+    # Crear usuario automáticamente solo si no existe
     users    = get_users()
     username = professional.get("username") or pid
 
     if username not in users:
-        role = professional.get("role", "medico")
+        role  = professional.get("role", "medico")
+        scope = professional.get("scope", "ica")
+
+        entry_map = {
+            "medico":    "/medico",
+            "kine":      "/kine",
+            "psicologo": "/psicologo",
+        }
+        allow_map = {
+            "medico":    ["agenda", "pacientes", "atencion", "documentos"],
+            "kine":      ["agenda", "pacientes"],
+            "psicologo": ["agenda", "pacientes"],
+        }
+
         save_user(username, {
             "password":     professional.get("password", "cambiar123"),
             "role": {
                 "name":  role,
-                "entry": f"/{role}",
-                "allow": ["agenda", "pacientes", "atencion", "documentos"]
+                "entry": entry_map.get(role, f"/{role}"),
+                "allow": allow_map.get(role, ["agenda", "pacientes"]),
+                "scope": scope,
             },
             "professional": pid,
-            "active":       True
+            "active":       True,
         })
 
     return professional
@@ -81,13 +95,9 @@ def delete_professional(pid: str) -> Dict[str, Any]:
 
     with _get_conn() as conn:
         with conn.cursor() as cur:
-            # Eliminar profesional
             cur.execute("DELETE FROM profesionales WHERE id = %s", (pid,))
-            # Eliminar usuario asociado
-            cur.execute("DELETE FROM usuarios WHERE id = %s", (username,))
-            # Eliminar sede
-            cur.execute("DELETE FROM sedes WHERE id = %s", (pid,))
+            cur.execute("DELETE FROM usuarios     WHERE id = %s", (username,))
+            cur.execute("DELETE FROM sedes         WHERE id = %s", (pid,))
             conn.commit()
 
     return prof
-            
