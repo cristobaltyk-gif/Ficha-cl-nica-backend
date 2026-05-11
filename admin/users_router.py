@@ -1,13 +1,11 @@
 from fastapi import APIRouter, HTTPException, Request
 from auth.users_store import load_users, save_users
-from db.supabase_client import _get_conn, get_users
-
+from db.supabase_client import _get_conn, get_users, get_centro, get_usuarios_centro
 
 router = APIRouter(prefix="/admin/users", tags=["admin-users"])
 
 
 def _get_scope(request: Request):
-    """Lee el scope del usuario autenticado desde X-Internal-User."""
     username = request.headers.get("X-Internal-User")
     if not username:
         return None
@@ -23,7 +21,6 @@ def list_users(request: Request):
     result = []
     for username, u in users.items():
         user_scope = (u.get("role") or {}).get("scope")
-        # Si hay scope autenticado → solo mostrar usuarios del mismo scope
         if scope and user_scope != scope:
             continue
         result.append({
@@ -39,22 +36,39 @@ def list_users(request: Request):
 def create_user(data: dict):
     username = data.get("username")
     if not username:
-        raise HTTPException(status_code=400, detail="Falta username")
+        raise HTTPException(400, "Falta username")
 
     password = data.get("password")
     if not password:
-        raise HTTPException(status_code=400, detail="Falta password")
+        raise HTTPException(400, "Falta password")
 
     rol   = data.get("role", "secretaria")
     scope = data.get("scope", "ica")
 
     if scope not in ("ica", "externo"):
-        raise HTTPException(status_code=400, detail="scope debe ser 'ica' o 'externo'")
+        raise HTTPException(400, "scope debe ser 'ica' o 'externo'")
+
+    # ── Verificar capacidad del centro en backend ──────────────
+    if scope != "externo":
+        try:
+            centro = get_centro(scope)
+            if centro:
+                max_u   = centro.get("max_usuarios") or {}
+                maximo  = max_u.get(rol, 0)
+                if maximo > 0:
+                    usuarios = get_usuarios_centro(scope)
+                    actual   = sum(1 for u in usuarios if (u.get("role") or {}).get("name") == rol)
+                    if actual >= maximo:
+                        raise HTTPException(403, f"Límite alcanzado para {rol}: {actual}/{maximo} usuarios")
+        except HTTPException:
+            raise
+        except Exception as e:
+            print(f"[USERS] Error verificando capacidad: {e}")
 
     users = load_users()
 
     if username in users:
-        raise HTTPException(status_code=409, detail="Usuario ya existe")
+        raise HTTPException(409, "Usuario ya existe")
 
     entry_map = {
         "admin":      "/admin",
@@ -92,7 +106,7 @@ def update_user(username: str, data: dict):
     users = load_users()
 
     if username not in users:
-        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+        raise HTTPException(404, "Usuario no encontrado")
 
     if "password" in data and data["password"]:
         users[username]["password"] = data["password"]
@@ -102,7 +116,7 @@ def update_user(username: str, data: dict):
         users[username]["role"] = data["role"]
     if "scope" in data:
         if data["scope"] not in ("ica", "externo"):
-            raise HTTPException(status_code=400, detail="scope debe ser 'ica' o 'externo'")
+            raise HTTPException(400, "scope debe ser 'ica' o 'externo'")
         if "role" not in data:
             users[username].setdefault("role", {})["scope"] = data["scope"]
 
@@ -115,7 +129,7 @@ def delete_user(username: str):
     users = load_users()
 
     if username not in users:
-        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+        raise HTTPException(404, "Usuario no encontrado")
 
     del users[username]
     save_users(users)
