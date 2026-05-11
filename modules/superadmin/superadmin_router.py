@@ -336,6 +336,31 @@ def cobrar_suscripcion(centro_id: str):
 
 
 # ══════════════════════════════════════════════════════════════
+# EXTERNOS — envío de credenciales
+# ══════════════════════════════════════════════════════════════
+
+@router.post("/externos/{centro_id}/enviar-credenciales")
+def enviar_credenciales_externo(centro_id: str, data: dict):
+    try:
+        from notifications.email_suscripciones import enviar_credenciales_externo
+        ok = enviar_credenciales_externo(
+            email_contacto=data["email_contacto"],
+            nombre=data["nombre"],
+            username=data["username"],
+            password_temp=data["password_temp"],
+            plan=data["plan"],
+        )
+        if not ok:
+            raise HTTPException(500, "Error enviando email")
+        print(f"[SUPERADMIN] ✅ Credenciales externo enviadas a {data['email_contacto']}")
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+# ══════════════════════════════════════════════════════════════
 # USUARIOS
 # ══════════════════════════════════════════════════════════════
 
