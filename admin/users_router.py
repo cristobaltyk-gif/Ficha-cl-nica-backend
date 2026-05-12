@@ -125,10 +125,6 @@ def update_user(username: str, data: dict):
 
 @router.delete("/{username}")
 def delete_user(username: str):
-    users = get_users()
-    if username not in users:
-        raise HTTPException(404, "Usuario no encontrado")
-
     with _get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM usuarios     WHERE id = %s", (username,))
