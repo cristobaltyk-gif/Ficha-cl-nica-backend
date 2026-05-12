@@ -430,9 +430,11 @@ def listar_profesionales():
 
 def _generar_link_pago(centro_id: str, monto: int, email: str) -> str:
     from modules.pagos.flow_client import crear_pago
+    import time
     mes    = date.today().strftime("%Y-%m")
+    id_pago = f"SUB-{centro_id}-{mes}-{int(time.time()) % 10000}"
     result = crear_pago(
-        id_pago=f"SUB-{centro_id}-{mes}",
+        id_pago=id_pago,
         amount=monto,
         subject=f"Suscripción sistema clínico ICA — {mes}",
         email=email,
