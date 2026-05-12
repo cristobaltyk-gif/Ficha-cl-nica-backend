@@ -431,15 +431,15 @@ def listar_profesionales():
 def _generar_link_pago(centro_id: str, monto: int, email: str) -> str:
     from modules.pagos.flow_client import crear_pago
     import time
-    mes    = date.today().strftime("%Y-%m")
+    mes     = date.today().strftime("%Y-%m")
     id_pago = f"SUB-{centro_id}-{mes}-{int(time.time()) % 10000}"
-    result = crear_pago(
+    result  = crear_pago(
         id_pago=id_pago,
         amount=monto,
         subject=f"Suscripción sistema clínico ICA — {mes}",
         email=email,
         url_confirmation=f"{BACKEND_URL}/api/suscripciones/webhook/pago",
-        url_return=f"{FRONTEND_URL}/suscripciones",
+        url_return=f"{FRONTEND_URL}/pago-exitoso",
         optional_data={"centro_id": centro_id},
     )
     return f"{result['url']}?token={result['token']}"
