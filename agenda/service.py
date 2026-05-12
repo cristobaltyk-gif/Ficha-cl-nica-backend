@@ -67,16 +67,23 @@ def _calcular_edad(fecha_nacimiento: str) -> int | None:
 def _enviar_confirmacion_reserva(rut, date, time, professional) -> None:
     try:
         from notifications.email_service import enviar_confirmacion_reserva
+        from db.supabase_client import get_users
         admin = _load_admin(rut)
         if not admin:
             return
         email = admin.get("email", "").strip()
         if not email:
             return
-        nombre     = f"{admin.get('nombre', '')} {admin.get('apellido_paterno', '')}".strip()
+        nombre      = f"{admin.get('nombre', '')} {admin.get('apellido_paterno', '')}".strip()
         nombre_prof = _get_professional_name(professional)
-        edad       = _calcular_edad(admin.get("fecha_nacimiento", ""))
-        sexo       = admin.get("sexo", "")
+        edad        = _calcular_edad(admin.get("fecha_nacimiento", ""))
+        sexo        = admin.get("sexo", "")
+
+        # Obtener rol del profesional para filtrar prediagnóstico
+        users = get_users()
+        u = users.get(professional, {})
+        rol_prof = (u.get("role") or {}).get("name", "")
+
         enviar_confirmacion_reserva(
             email_paciente=email,
             nombre_paciente=nombre,
@@ -84,6 +91,7 @@ def _enviar_confirmacion_reserva(rut, date, time, professional) -> None:
             fecha=date,
             hora=time,
             profesional_nombre=nombre_prof,
+            rol_profesional=rol_prof,
             edad_paciente=edad,
             sexo_paciente=sexo,
         )
