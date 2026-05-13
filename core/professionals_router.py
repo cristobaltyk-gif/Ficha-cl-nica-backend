@@ -53,13 +53,12 @@ def get_all(request: Request, public: bool = False, region: Optional[str] = None
 
     scope = _get_scope(request)
     if scope:
-        # Obtener scope de cada profesional desde tabla usuarios
         users = get_users()
         result = []
         for p in profs:
             pid        = p.get("id") or ""
             u          = users.get(pid, {})
-            prof_scope = (u.get("role") or {}).get("scope", "ica")
+            prof_scope = (u.get("role") or {}).get("scope") or "ica"
             if prof_scope == scope:
                 result.append(p)
         profs = result
