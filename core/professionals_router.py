@@ -15,12 +15,10 @@ router = APIRouter(prefix="/professionals", tags=["professionals"])
 
 
 def _get_scope(request: Request) -> Optional[str]:
-    """Lee el scope del usuario autenticado desde X-Internal-User."""
     username = request.headers.get("X-Internal-User")
     if not username:
         return None
-    users = get_users()
-    u = users.get(username, {})
+    u = get_users().get(username, {})
     return (u.get("role") or {}).get("scope")
 
 
@@ -53,11 +51,18 @@ def _filtrar_por_region(professionals: list, region: str) -> list:
 def get_all(request: Request, public: bool = False, region: Optional[str] = None):
     profs = list_professionals(only_public=public)
 
-    # Filtrar por scope del admin autenticado
     scope = _get_scope(request)
-    if scope and scope not in ("externo",):
-        profs = [p for p in profs if (p.get("role") or {}).get("scope") == scope
-                 or (p.get("role") is None)]
+    if scope:
+        # Obtener scope de cada profesional desde tabla usuarios
+        users = get_users()
+        result = []
+        for p in profs:
+            pid        = p.get("id") or ""
+            u          = users.get(pid, {})
+            prof_scope = (u.get("role") or {}).get("scope", "ica")
+            if prof_scope == scope:
+                result.append(p)
+        profs = result
 
     if region:
         profs = _filtrar_por_region(profs, region)
