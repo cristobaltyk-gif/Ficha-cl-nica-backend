@@ -6,9 +6,8 @@ Mantiene la misma interfaz para compatibilidad.
 """
 from __future__ import annotations
 
-import json
 from typing import Dict, Any, List, Optional
-from db.supabase_client import _get_conn, _utc_now, get_profesionales, save_profesional
+from db.supabase_client import _get_conn, get_profesionales, save_profesional
 from db.supabase_client import get_users, save_user
 
 
@@ -43,7 +42,6 @@ def add_professional(professional: Dict[str, Any]) -> Dict[str, Any]:
 
     save_profesional(pid, professional)
 
-    # Crear usuario automáticamente solo si no existe
     users    = get_users()
     username = professional.get("username") or pid
 
@@ -95,8 +93,9 @@ def delete_professional(pid: str) -> Dict[str, Any]:
 
     with _get_conn() as conn:
         with conn.cursor() as cur:
+            cur.execute("UPDATE eventos SET professional_id = NULL WHERE professional_id = %s", (pid,))
             cur.execute("DELETE FROM profesionales WHERE id = %s", (pid,))
-            cur.execute("DELETE FROM usuarios     WHERE id = %s", (username,))
+            cur.execute("DELETE FROM usuarios      WHERE id = %s", (username,))
             cur.execute("DELETE FROM sedes         WHERE id = %s", (pid,))
             conn.commit()
 
