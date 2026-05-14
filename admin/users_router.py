@@ -95,6 +95,22 @@ def create_user(data: dict):
             "scope": scope,
         }
     })
+
+    email = data.get("email")
+    if email:
+        try:
+            from notifications.email_suscripciones import enviar_credenciales_externo
+            enviar_credenciales_externo(
+                email_contacto=email,
+                nombre=data.get("professional", username),
+                username=username,
+                password_temp=password,
+                plan=rol,
+            )
+            print(f"[USERS] ✅ Credenciales enviadas a {email}")
+        except Exception as e:
+            print(f"[USERS] ⚠️ Error enviando credenciales: {e}")
+
     return {"ok": True, "username": username}
 
 
@@ -125,7 +141,6 @@ def update_user(username: str, data: dict):
 def delete_user(username: str):
     with _get_conn() as conn:
         with conn.cursor() as cur:
-            # Archivar profesional si existe antes de borrar
             cur.execute("""
                 INSERT INTO profesionales_archivados
                     (id, name, rut, specialty, schedule, blocked_dates, archived_at)
