@@ -50,7 +50,6 @@ def create_user(data: dict):
     if scope not in ("ica", "externo"):
         raise HTTPException(400, "scope debe ser 'ica' o 'externo'")
 
-    # Verificar capacidad del centro en backend
     if scope != "externo":
         try:
             centro = get_centro(scope)
@@ -67,7 +66,6 @@ def create_user(data: dict):
         except Exception as e:
             print(f"[USERS] Error verificando capacidad: {e}")
 
-    # Verificar si ya existe en PostgreSQL
     if username in get_users():
         raise HTTPException(409, "Usuario ya existe")
 
@@ -127,9 +125,9 @@ def update_user(username: str, data: dict):
 def delete_user(username: str):
     with _get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM usuarios     WHERE id = %s", (username,))
+            cur.execute("UPDATE eventos SET professional_id = NULL WHERE professional_id = %s", (username,))
+            cur.execute("DELETE FROM usuarios      WHERE id = %s", (username,))
             cur.execute("DELETE FROM profesionales WHERE id = %s", (username,))
             cur.execute("DELETE FROM sedes         WHERE id = %s", (username,))
             conn.commit()
-
     return {"ok": True}
