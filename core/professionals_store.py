@@ -93,7 +93,14 @@ def delete_professional(pid: str) -> Dict[str, Any]:
 
     with _get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("UPDATE eventos SET professional_id = NULL WHERE professional_id = %s", (pid,))
+            # Archivar profesional antes de borrar
+            cur.execute("""
+                INSERT INTO profesionales_archivados
+                    (id, name, rut, specialty, schedule, blocked_dates, archived_at)
+                SELECT id, name, rut, specialty, schedule, blocked_dates, NOW()
+                FROM profesionales WHERE id = %s
+                ON CONFLICT (id) DO UPDATE SET archived_at = NOW()
+            """, (pid,))
             cur.execute("DELETE FROM profesionales WHERE id = %s", (pid,))
             cur.execute("DELETE FROM usuarios      WHERE id = %s", (username,))
             cur.execute("DELETE FROM sedes         WHERE id = %s", (pid,))
