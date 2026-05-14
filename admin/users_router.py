@@ -125,9 +125,16 @@ def update_user(username: str, data: dict):
 def delete_user(username: str):
     with _get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("UPDATE eventos SET professional_id = NULL WHERE professional_id = %s", (username,))
-            cur.execute("DELETE FROM usuarios      WHERE id = %s", (username,))
+            # Archivar profesional si existe antes de borrar
+            cur.execute("""
+                INSERT INTO profesionales_archivados
+                    (id, name, rut, specialty, schedule, blocked_dates, archived_at)
+                SELECT id, name, rut, specialty, schedule, blocked_dates, NOW()
+                FROM profesionales WHERE id = %s
+                ON CONFLICT (id) DO UPDATE SET archived_at = NOW()
+            """, (username,))
             cur.execute("DELETE FROM profesionales WHERE id = %s", (username,))
+            cur.execute("DELETE FROM usuarios      WHERE id = %s", (username,))
             cur.execute("DELETE FROM sedes         WHERE id = %s", (username,))
             conn.commit()
     return {"ok": True}
