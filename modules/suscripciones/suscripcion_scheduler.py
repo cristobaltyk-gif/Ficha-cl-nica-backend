@@ -14,7 +14,6 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "https://admin.icarticular.cl")
 
 
 def _generar_link_renovacion(s: dict) -> str:
-    """Genera link de pago Flow para renovación mensual."""
     try:
         from modules.pagos.flow_client import crear_pago
         mes    = date.today().strftime("%Y-%m")
@@ -24,7 +23,7 @@ def _generar_link_renovacion(s: dict) -> str:
             subject=f"Renovación {s['nombre_centro']} — {mes}",
             email=s["email_contacto"],
             url_confirmation=f"{BACKEND_URL}/api/suscripciones/webhook/pago",
-            url_return=f"{FRONTEND_URL}/suscripciones",
+            url_return=f"{FRONTEND_URL}/pago-exitoso",
             optional_data={"centro_id": s["centro_id"]},
         )
         return f"{result['url']}?token={result['token']}"
@@ -50,33 +49,31 @@ def _revisar_suscripciones():
         vencimiento = s.get("fecha_vencimiento", "")
         estado      = s.get("estado", "activo")
 
-        # ── Descuento vencido ────────────────────────────────
         if s.get("descuento_hasta") and hoy > s["descuento_hasta"]:
             update_suscripcion(centro_id, {
-                "descuento_pct":   0,
+                "descuento_pct":    0,
                 "descuento_motivo": "",
-                "descuento_hasta": None,
-                "precio_final":    s["precio_base"]
+                "descuento_hasta":  None,
+                "precio_final":     s["precio_base"]
             })
             print(f"[SUSCRIPCIONES] Descuento vencido para {centro_id}")
 
-        # ── Vencida → suspender y notificar ─────────────────
         if estado == "activo" and vencimiento and hoy > vencimiento:
             update_suscripcion(centro_id, {"estado": "suspendido"})
             print(f"[SUSCRIPCIONES] ⚠️ Suspendida: {centro_id}")
             try:
+                link = _generar_link_renovacion(s)
                 from notifications.email_suscripciones import enviar_aviso_suspension
                 enviar_aviso_suspension(
                     email_contacto=s["email_contacto"],
                     nombre_centro=s["nombre_centro"],
                     monto=s["precio_final"],
+                    link_pago=link,
                 )
-                # Desactivar usuarios del centro
                 _suspender_usuarios_centro(centro_id)
             except Exception as e:
                 print(f"[SUSCRIPCIONES] Error suspendiendo {centro_id}: {e}")
 
-        # ── 3 días antes → recordatorio con link de pago ────
         elif estado == "activo" and vencimiento == alerta:
             print(f"[SUSCRIPCIONES] 📧 Recordatorio 3 días: {centro_id}")
             try:
@@ -94,7 +91,6 @@ def _revisar_suscripciones():
 
 
 def _suspender_usuarios_centro(centro_id: str):
-    """Desactiva todos los usuarios del centro al suspender."""
     try:
         from db.supabase_client import _get_conn
         with _get_conn() as conn:
@@ -110,6 +106,22 @@ def _suspender_usuarios_centro(centro_id: str):
         print(f"[SUSCRIPCIONES] Error desactivando usuarios: {e}")
 
 
+def _reactivar_usuarios_centro(centro_id: str):
+    try:
+        from db.supabase_client import _get_conn
+        with _get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE usuarios SET active = TRUE
+                    WHERE role->>'scope' = %s
+                """, (centro_id,))
+                count = cur.rowcount
+                conn.commit()
+        print(f"[SUSCRIPCIONES] {count} usuarios reactivados para {centro_id}")
+    except Exception as e:
+        print(f"[SUSCRIPCIONES] Error reactivando usuarios: {e}")
+
+
 def start_suscripcion_scheduler():
     import schedule, time
 
@@ -123,4 +135,3 @@ def start_suscripcion_scheduler():
     t = threading.Thread(target=run, daemon=True)
     t.start()
     print("🔔 [SUSCRIPCIONES] Scheduler iniciado — revisa diariamente a las 08:00")
-    
