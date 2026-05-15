@@ -16,7 +16,7 @@ from db.supabase_client import get_suscripcion, update_suscripcion
 router = APIRouter(prefix="/api/suscripciones", tags=["Suscripciones"])
 
 BACKEND_URL  = os.getenv("BACKEND_URL",  "https://services.icarticular.cl")
-FRONTEND_URL = os.getenv("FRONTEND_URL", "https://clinica.icarticular.cl")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://admin.icarticular.cl")
 
 
 @router.get("/retorno-info")
@@ -69,12 +69,20 @@ async def webhook_pago(request: Request):
 
     nueva_fecha    = (date.today() + timedelta(days=30)).isoformat()
     es_primer_pago = s.get("estado") == "pendiente_pago"
+    era_suspendido = s.get("estado") == "suspendido"
 
     update_suscripcion(centro_id, {
         "estado":            "activo",
         "fecha_vencimiento": nueva_fecha
     })
     print(f"[WEBHOOK] ✅ Suscripción {centro_id} activada hasta {nueva_fecha}")
+
+    if era_suspendido:
+        try:
+            from modules.suscripciones.suscripcion_scheduler import _reactivar_usuarios_centro
+            _reactivar_usuarios_centro(centro_id)
+        except Exception as e:
+            print(f"[WEBHOOK] Error reactivando usuarios: {e}")
 
     if es_primer_pago:
         try:
