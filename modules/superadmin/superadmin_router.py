@@ -222,7 +222,6 @@ def cambiar_estado(centro_id: str, data: dict):
     if estado not in ("activo", "vencido", "suspendido"):
         raise HTTPException(400, "Estado inválido")
     update_suscripcion(centro_id, {"estado": estado})
-    # Sincronizar activo/inactivo en tabla centros
     try:
         centro = get_centro(centro_id)
         if centro:
@@ -230,8 +229,18 @@ def cambiar_estado(centro_id: str, data: dict):
             save_centro(centro)
     except Exception as e:
         print(f"[SUPERADMIN] Error sincronizando estado centro: {e}")
+    try:
+        from modules.suscripciones.suscripcion_scheduler import (
+            _suspender_usuarios_centro,
+            _reactivar_usuarios_centro,
+        )
+        if estado == "activo":
+            _reactivar_usuarios_centro(centro_id)
+        else:
+            _suspender_usuarios_centro(centro_id)
+    except Exception as e:
+        print(f"[SUPERADMIN] Error actualizando usuarios: {e}")
     return {"ok": True}
-
 
 @router.patch("/suscripciones/{centro_id}/descuento")
 def aplicar_descuento(centro_id: str, data: dict):
