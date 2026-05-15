@@ -16,17 +16,15 @@ from auth.superadmin_auth import require_superadmin
 from auth.internal_auth import require_internal_auth
 from db.supabase_client import (
     get_centros, get_centro, save_centro,
-    delete_centro, get_usuarios_centro
+    delete_centro, get_usuarios_centro, _get_conn
 )
 
-# ── Router superadmin (escritura) ──────────────────────────────
 router = APIRouter(
     prefix="/api/superadmin/centros",
     tags=["Superadmin - Centros"],
     dependencies=[Depends(require_superadmin)]
 )
 
-# ── Router interno (solo lectura, X-Internal-User) ─────────────
 router_interno = APIRouter(
     prefix="/api/centros",
     tags=["Centros - Interno"],
@@ -48,10 +46,6 @@ class ActualizarCentroRequest(BaseModel):
     activo:         Optional[bool] = None
     max_usuarios:   Optional[Dict[str, int]] = None
 
-
-# ══════════════════════════════════════════════════════════════
-# SUPERADMIN — escritura completa
-# ══════════════════════════════════════════════════════════════
 
 @router.get("")
 def listar_centros():
@@ -93,6 +87,27 @@ def actualizar_centro(centro_id: str, data: ActualizarCentroRequest):
 def borrar_centro(centro_id: str):
     if not get_centro(centro_id):
         raise HTTPException(404, "Centro no encontrado")
+
+    usuarios = get_usuarios_centro(centro_id)
+
+    with _get_conn() as conn:
+        with conn.cursor() as cur:
+            for u in usuarios:
+                username = u.get("username")
+                if not username:
+                    continue
+                cur.execute("""
+                    INSERT INTO profesionales_archivados
+                        (id, name, rut, specialty, schedule, blocked_dates, archived_at)
+                    SELECT id, name, rut, specialty, schedule, blocked_dates, NOW()
+                    FROM profesionales WHERE id = %s
+                    ON CONFLICT (id) DO UPDATE SET archived_at = NOW()
+                """, (username,))
+                cur.execute("DELETE FROM profesionales WHERE id = %s", (username,))
+                cur.execute("DELETE FROM usuarios      WHERE id = %s", (username,))
+                cur.execute("DELETE FROM sedes         WHERE id = %s", (username,))
+            conn.commit()
+
     delete_centro(centro_id)
     return {"ok": True, "deleted": centro_id}
 
@@ -103,10 +118,6 @@ def usuarios_centro(centro_id: str):
         raise HTTPException(404, "Centro no encontrado")
     return get_usuarios_centro(centro_id)
 
-
-# ══════════════════════════════════════════════════════════════
-# INTERNO — solo lectura capacidad (X-Internal-User)
-# ══════════════════════════════════════════════════════════════
 
 @router_interno.get("/{centro_id}/capacidad")
 def capacidad_centro(centro_id: str):
