@@ -71,7 +71,28 @@ def get_all(request: Request, public: bool = False, region: Optional[str] = None
 @router.post("")
 def create(professional: dict):
     try:
-        return add_professional(professional)
+        result = add_professional(professional)
+
+        email    = professional.get("email")
+        username = professional.get("username") or professional.get("id")
+        password = professional.get("password", "cambiar123")
+        role     = professional.get("role", "medico")
+
+        if email and username:
+            try:
+                from notifications.email_suscripciones import enviar_credenciales_externo
+                enviar_credenciales_externo(
+                    email_contacto=email,
+                    nombre=professional.get("name", username),
+                    username=username,
+                    password_temp=password,
+                    plan=role,
+                )
+                print(f"[PROFESSIONALS] ✅ Credenciales enviadas a {email}")
+            except Exception as e:
+                print(f"[PROFESSIONALS] ⚠️ Error enviando credenciales: {e}")
+
+        return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
