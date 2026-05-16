@@ -93,8 +93,8 @@ def borrar_centro(centro_id: str):
     with _get_conn() as conn:
         with conn.cursor() as cur:
             for u in usuarios:
-                username = u.get("username")
-                if not username:
+                uid = u.get("id")
+                if not uid:
                     continue
                 cur.execute("""
                     INSERT INTO profesionales_archivados
@@ -102,10 +102,10 @@ def borrar_centro(centro_id: str):
                     SELECT id, name, rut, specialty, schedule, blocked_dates, NOW()
                     FROM profesionales WHERE id = %s
                     ON CONFLICT (id) DO UPDATE SET archived_at = NOW()
-                """, (username,))
-                cur.execute("DELETE FROM profesionales WHERE id = %s", (username,))
-                cur.execute("DELETE FROM usuarios      WHERE id = %s", (username,))
-                cur.execute("DELETE FROM sedes         WHERE id = %s", (username,))
+                """, (uid,))
+                cur.execute("DELETE FROM profesionales WHERE id = %s", (uid,))
+                cur.execute("DELETE FROM usuarios      WHERE id = %s", (uid,))
+                cur.execute("DELETE FROM sedes         WHERE id = %s", (uid,))
             conn.commit()
 
     delete_centro(centro_id)
