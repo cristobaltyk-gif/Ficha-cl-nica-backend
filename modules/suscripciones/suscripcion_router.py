@@ -10,6 +10,7 @@ import json
 import secrets
 from datetime import date, timedelta
 from fastapi import APIRouter, Request
+from fastapi.responses import RedirectResponse
 
 from db.supabase_client import get_suscripcion, update_suscripcion
 
@@ -17,6 +18,18 @@ router = APIRouter(prefix="/api/suscripciones", tags=["Suscripciones"])
 
 BACKEND_URL  = os.getenv("BACKEND_URL",  "https://services.icarticular.cl")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "https://admin.icarticular.cl")
+
+
+@router.api_route("/retorno", methods=["GET", "POST"])
+async def retorno_suscripcion(request: Request):
+    token = request.query_params.get("token", "")
+    if request.method == "POST":
+        form  = await request.form()
+        token = form.get("token", token)
+    return RedirectResponse(
+        url=f"{FRONTEND_URL}/pago-exitoso?token={token}",
+        status_code=302
+    )
 
 
 @router.get("/retorno-info")
