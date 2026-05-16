@@ -23,7 +23,7 @@ def _generar_link_renovacion(s: dict) -> str:
             subject=f"Renovación {s['nombre_centro']} — {mes}",
             email=s["email_contacto"],
             url_confirmation=f"{BACKEND_URL}/api/suscripciones/webhook/pago",
-            url_return=f"{FRONTEND_URL}/pago-exitoso",
+            url_return=f"{BACKEND_URL}/api/suscripciones/retorno",
             optional_data={"centro_id": s["centro_id"]},
         )
         return f"{result['url']}?token={result['token']}"
