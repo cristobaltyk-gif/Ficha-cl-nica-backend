@@ -40,10 +40,22 @@ def _load_agenda_day(date, professional):
     return day_data.get(professional, {}).get("slots", {})
 
 
-def _load_agenda_professionals(date):
+def _load_agenda_professionals(date, scope=None):
     from core.professionals_store import list_professionals
-    valid_ids = {p["id"] for p in list_professionals()}
-    day_data  = read_agenda_day(date)
+    from db.supabase_client import get_users
+    users    = get_users()
+    valid_ids = set()
+    for p in list_professionals():
+        pid = p.get("id", "")
+        if pid.startswith("ia_"):
+            continue
+        if scope and scope != "ica":
+            u          = users.get(pid, {})
+            prof_scope = (u.get("role") or {}).get("scope", "ica")
+            if prof_scope != scope:
+                continue
+        valid_ids.add(pid)
+    day_data = read_agenda_day(date)
     return [k for k in day_data.keys() if k in valid_ids]
 
 
@@ -256,8 +268,9 @@ def get_caja_summary(date: str, professional: str, auth=Depends(require_internal
 
 @router.get("/resumen-dia")
 def get_resumen_dia(date: str, professional: Optional[str]=Query(None), auth=Depends(require_internal_auth)):
+    scope         = (auth.get("role") or {}).get("scope", "ica")
     professional  = _resolve_professional(auth, professional)
-    professionals = [professional] if professional else _load_agenda_professionals(date)
+    professionals = [professional] if professional else _load_agenda_professionals(date, scope)
     resumen_por_prof=[]; total_global=0; retencion_global=0; neto_global=0
     por_tipo_global={}; por_metodo_global={}; pacientes_global=[]
     for prof in professionals:
@@ -292,4 +305,3 @@ def get_pdf_mes(month: str, professional: Optional[str]=Query(None), auth=Depend
     filename = f"caja_{month}_{professional}.pdf" if professional else f"caja_{month}.pdf"
     return StreamingResponse(buf, media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename={filename}"})
-                
