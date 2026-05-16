@@ -448,7 +448,7 @@ def _generar_link_pago(centro_id: str, monto: int, email: str) -> str:
         subject=f"Suscripción sistema clínico ICA — {mes}",
         email=email,
         url_confirmation=f"{BACKEND_URL}/api/suscripciones/webhook/pago",
-        url_return=f"{FRONTEND_URL}/pago-exitoso",
+        url_return=f"{BACKEND_URL}/api/suscripciones/retorno",
         optional_data={"centro_id": centro_id},
     )
     return f"{result['url']}?token={result['token']}"
