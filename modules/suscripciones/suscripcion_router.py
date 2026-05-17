@@ -20,6 +20,14 @@ BACKEND_URL  = os.getenv("BACKEND_URL",  "https://services.icarticular.cl")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "https://admin.icarticular.cl")
 
 
+@router.get("/tipo")
+async def get_tipo(scope: str):
+    s = get_suscripcion(scope)
+    if not s:
+        return {"tipo": "externo_completo"}
+    return {"tipo": s.get("plan", "externo_completo")}
+
+
 @router.api_route("/retorno", methods=["GET", "POST"])
 async def retorno_suscripcion(request: Request):
     token = request.query_params.get("token", "")
