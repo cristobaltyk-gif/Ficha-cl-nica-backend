@@ -48,20 +48,23 @@ def _filtrar_por_region(professionals: list, region: str) -> list:
 
 
 @router.get("")
-def get_all(request: Request, public: bool = False, region: Optional[str] = None):
+def get_all(request: Request, public: bool = False, region: Optional[str] = None, scope: Optional[str] = None):
     profs = list_professionals(only_public=public)
 
-    scope = _get_scope(request)
-    if scope:
+    if public and scope:
         users = get_users()
-        result = []
-        for p in profs:
-            pid        = p.get("id") or ""
-            u          = users.get(pid, {})
-            prof_scope = (u.get("role") or {}).get("scope") or "ica"
-            if prof_scope == scope:
-                result.append(p)
-        profs = result
+        profs = [
+            p for p in profs
+            if (users.get(p.get("id"), {}).get("role") or {}).get("scope", "ica") == scope
+        ]
+    else:
+        internal_scope = _get_scope(request)
+        if internal_scope:
+            users = get_users()
+            profs = [
+                p for p in profs
+                if (users.get(p.get("id"), {}).get("role") or {}).get("scope", "ica") == internal_scope
+            ]
 
     if region:
         profs = _filtrar_por_region(profs, region)
