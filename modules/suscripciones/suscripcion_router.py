@@ -140,6 +140,14 @@ def _crear_usuario_admin_centro(centro_id: str, s: dict) -> tuple[str, str]:
             "allow": ["agenda", "pacientes", "atencion", "documentos", "administracion"],
             "scope": centro_id,
         }
+    elif plan == "externo_completo":
+        username = centro_id
+        role = {
+            "name":  "medico",
+            "entry": "/medico",
+            "allow": ["agenda", "pacientes", "atencion", "documentos"],
+            "scope": centro_id,
+        }
     else:
         username = centro_id
         role = {
