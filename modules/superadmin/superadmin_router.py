@@ -169,7 +169,8 @@ def crear_suscripcion(data: dict):
             return {"ok": True, "warning": str(e)}
 
     return {"ok": True}
-    @router.delete("/suscripciones/{centro_id}")
+    
+@router.delete("/suscripciones/{centro_id}")
 def borrar_suscripcion(centro_id: str):
     s = get_suscripcion(centro_id)
     if not s:
