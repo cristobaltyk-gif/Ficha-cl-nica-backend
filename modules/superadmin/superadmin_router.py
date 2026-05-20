@@ -127,6 +127,15 @@ def crear_suscripcion(data: dict):
         except Exception as e:
             print(f"[SUPERADMIN] Error grabando centro: {e}")
 
+    # ── Provisionar infraestructura si es externo_completo ──
+    if plan == "externo_completo":
+        try:
+            from modules.superadmin.provisioning_service import provisionar_externo_completo
+            provisionar_externo_completo(centro_id)
+            print(f"[SUPERADMIN] ✅ Infraestructura provisionada para {centro_id}")
+        except Exception as e:
+            print(f"[SUPERADMIN] ⚠️ Provisioning error: {e}")
+
     # Generar link de pago y enviar email
     if precios["precio_final"] > 0 and data.get("email_contacto"):
         try:
@@ -160,9 +169,7 @@ def crear_suscripcion(data: dict):
             return {"ok": True, "warning": str(e)}
 
     return {"ok": True}
-
-
-@router.delete("/suscripciones/{centro_id}")
+    @router.delete("/suscripciones/{centro_id}")
 def borrar_suscripcion(centro_id: str):
     s = get_suscripcion(centro_id)
     if not s:
@@ -198,7 +205,6 @@ def modificar_roles(centro_id: str, data: dict):
         "precio_final":precios["precio_final"],
     })
 
-    # Sincronizar tabla centros si es plan centro
     if s.get("plan") == "centro":
         try:
             centro = get_centro(centro_id)
@@ -242,6 +248,7 @@ def cambiar_estado(centro_id: str, data: dict):
         print(f"[SUPERADMIN] Error actualizando usuarios: {e}")
     return {"ok": True}
 
+
 @router.patch("/suscripciones/{centro_id}/descuento")
 def aplicar_descuento(centro_id: str, data: dict):
     update_suscripcion(centro_id, {
@@ -255,19 +262,16 @@ def aplicar_descuento(centro_id: str, data: dict):
 
 @router.patch("/suscripciones/{centro_id}")
 def modificar_suscripcion(centro_id: str, data: dict):
-    """Modifica cualquier campo de la suscripción — superadmin tiene control total."""
     s = get_suscripcion(centro_id)
     if not s:
         raise HTTPException(404, "Suscripción no encontrada")
 
-    # Si cambian roles → recalcular precio
     if "roles" in data and s.get("plan") == "centro":
         roles    = data["roles"]
         desc_pct = data.get("descuento_pct", s.get("descuento_pct", 0))
         precios  = calcular_precio_centro(roles, desc_pct)
         data["precio_base"]  = precios["precio_base"]
         data["precio_final"] = precios["precio_final"]
-        # Sincronizar tabla centros
         try:
             centro = get_centro(centro_id)
             if centro:
@@ -284,7 +288,6 @@ def modificar_suscripcion(centro_id: str, data: dict):
 
     update_suscripcion(centro_id, data)
 
-    # Enviar email si cambió algo relevante
     campos_relevantes = {"roles", "precio_final", "fecha_vencimiento", "descuento_pct", "estado"}
     if campos_relevantes & set(data.keys()):
         try:
