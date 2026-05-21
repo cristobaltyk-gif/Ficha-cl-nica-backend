@@ -112,7 +112,7 @@ def crear_suscripcion(data: dict):
 
     save_suscripcion(suscripcion)
 
-    # Si es plan centro → grabar también en tabla centros
+    # Si es plan centro → grabar en tabla centros + provisionar
     if plan == "centro":
         try:
             save_centro({
@@ -127,7 +127,14 @@ def crear_suscripcion(data: dict):
         except Exception as e:
             print(f"[SUPERADMIN] Error grabando centro: {e}")
 
-    # ── Provisionar infraestructura si es externo_completo ──
+        try:
+            from modules.superadmin.provisioning_service import provisionar_centro
+            provisionar_centro(centro_id)
+            print(f"[SUPERADMIN] ✅ Infraestructura provisionada para centro {centro_id}")
+        except Exception as e:
+            print(f"[SUPERADMIN] ⚠️ Provisioning centro error: {e}")
+
+    # Si es externo_completo → provisionar
     if plan == "externo_completo":
         try:
             from modules.superadmin.provisioning_service import provisionar_externo_completo
@@ -169,20 +176,37 @@ def crear_suscripcion(data: dict):
             return {"ok": True, "warning": str(e)}
 
     return {"ok": True}
-    
+
+
 @router.delete("/suscripciones/{centro_id}")
 def borrar_suscripcion(centro_id: str):
     s = get_suscripcion(centro_id)
     if not s:
         raise HTTPException(404, "Suscripción no encontrada")
+
+    # ── Desprovisionar según plan ──
+    if s.get("plan") == "externo_completo":
+        try:
+            from modules.superadmin.deprovisioning_service import desprovisionar_externo_completo
+            desprovisionar_externo_completo(centro_id)
+            print(f"[SUPERADMIN] ✅ Infraestructura externo eliminada para {centro_id}")
+        except Exception as e:
+            print(f"[SUPERADMIN] ⚠️ Deprovisioning externo error: {e}")
+
+    elif s.get("plan") == "centro":
+        try:
+            from modules.superadmin.deprovisioning_service import desprovisionar_centro
+            desprovisionar_centro(centro_id)
+            print(f"[SUPERADMIN] ✅ Infraestructura centro eliminada para {centro_id}")
+        except Exception as e:
+            print(f"[SUPERADMIN] ⚠️ Deprovisioning centro error: {e}")
+
     with _get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM suscripciones WHERE centro_id = %s", (centro_id,))
             conn.commit()
     return {"ok": True, "deleted": centro_id}
-
-
-@router.patch("/suscripciones/{centro_id}/roles")
+    @router.patch("/suscripciones/{centro_id}/roles")
 def modificar_roles(centro_id: str, data: dict):
     s = get_suscripcion(centro_id)
     if not s:
