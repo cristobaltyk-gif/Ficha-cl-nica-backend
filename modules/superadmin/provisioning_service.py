@@ -1,64 +1,70 @@
 """
 modules/superadmin/provisioning_service.py
-Automatiza la creación de infraestructura para externos completos.
+Automatiza la creación de infraestructura para externos completos y centros.
 Llama a Cloudflare, Vercel y Render APIs en secuencia.
 """
 from __future__ import annotations
 import os
 import httpx
 
-CLOUDFLARE_TOKEN  = os.getenv("CLOUDFLARE_TOKEN")
+CLOUDFLARE_TOKEN   = os.getenv("CLOUDFLARE_TOKEN")
 CLOUDFLARE_ZONE_ID = os.getenv("CLOUDFLARE_ZONE_ID")
-VERCEL_TOKEN      = os.getenv("VERCEL_TOKEN")
-VERCEL_PROJECT_ID = os.getenv("VERCEL_PROJECT_ID")
-RENDER_API_KEY    = os.getenv("RENDER_API_KEY")
-RENDER_SERVICE_ID = os.getenv("RENDER_SERVICE_ID")
-FRONTEND_URLS     = os.getenv("FRONTEND_URLS", "")
+VERCEL_TOKEN       = os.getenv("VERCEL_TOKEN")
+VERCEL_PROJECT_ID  = os.getenv("VERCEL_PROJECT_ID")
+RENDER_API_KEY     = os.getenv("RENDER_API_KEY")
+RENDER_SERVICE_ID  = os.getenv("RENDER_SERVICE_ID")
 
-BASE_DOMAIN = "reservas.icarticular.cl"
+BASE_DOMAIN_EXTERNO = "reservas.icarticular.cl"
+BASE_DOMAIN_CENTRO  = "icarticular.cl"
 
 
 def provisionar_externo_completo(username: str) -> dict:
     """
-    Crea subdominio completo para un externo_completo.
-    Pasos:
-    1. Cloudflare → CNAME username.reservas.icarticular.cl
-    2. Vercel     → agrega dominio al proyecto
-    3. Render     → actualiza FRONTEND_URLS
+    Crea subdominio para externo_completo.
+    → username.reservas.icarticular.cl
     """
+    return _provisionar(username, BASE_DOMAIN_EXTERNO)
+
+
+def provisionar_centro(centro_id: str) -> dict:
+    """
+    Crea subdominio para centro.
+    → centro_id.icarticular.cl
+    """
+    return _provisionar(centro_id, BASE_DOMAIN_CENTRO)
+
+
+def _provisionar(username: str, base_domain: str) -> dict:
     results = {}
 
-    # ── 1. CLOUDFLARE ──────────────────────────────────────────
     try:
-        results["cloudflare"] = _crear_cname_cloudflare(username)
+        results["cloudflare"] = _crear_cname_cloudflare(username, base_domain)
     except Exception as e:
         results["cloudflare"] = {"ok": False, "error": str(e)}
         print(f"[PROVISIONING] ❌ Cloudflare error: {e}")
 
-    # ── 2. VERCEL ──────────────────────────────────────────────
     try:
-        results["vercel"] = _agregar_dominio_vercel(username)
+        results["vercel"] = _agregar_dominio_vercel(username, base_domain)
     except Exception as e:
         results["vercel"] = {"ok": False, "error": str(e)}
         print(f"[PROVISIONING] ❌ Vercel error: {e}")
 
-    # ── 3. RENDER ──────────────────────────────────────────────
     try:
-        results["render"] = _actualizar_cors_render(username)
+        results["render"] = _actualizar_cors_render(username, base_domain)
     except Exception as e:
         results["render"] = {"ok": False, "error": str(e)}
         print(f"[PROVISIONING] ❌ Render error: {e}")
 
     ok = all(r.get("ok") for r in results.values())
-    print(f"[PROVISIONING] {'✅' if ok else '⚠️'} {username} — {results}")
+    print(f"[PROVISIONING] {'✅' if ok else '⚠️'} {username}.{base_domain} — {results}")
     return {"ok": ok, "details": results}
 
 
-def _crear_cname_cloudflare(username: str) -> dict:
+def _crear_cname_cloudflare(username: str, base_domain: str) -> dict:
     if not CLOUDFLARE_TOKEN or not CLOUDFLARE_ZONE_ID:
         raise ValueError("Faltan CLOUDFLARE_TOKEN o CLOUDFLARE_ZONE_ID")
 
-    subdominio = f"{username}.{BASE_DOMAIN}"
+    subdominio = f"{username}.{base_domain}"
 
     res = httpx.post(
         f"https://api.cloudflare.com/client/v4/zones/{CLOUDFLARE_ZONE_ID}/dns_records",
@@ -78,7 +84,6 @@ def _crear_cname_cloudflare(username: str) -> dict:
 
     data = res.json()
     if not data.get("success"):
-        # Si ya existe el registro no es un error crítico
         errors = data.get("errors", [])
         if any("already exists" in str(e).lower() for e in errors):
             print(f"[PROVISIONING] CNAME {subdominio} ya existe — ok")
@@ -89,11 +94,11 @@ def _crear_cname_cloudflare(username: str) -> dict:
     return {"ok": True, "record": data.get("result", {}).get("id")}
 
 
-def _agregar_dominio_vercel(username: str) -> dict:
+def _agregar_dominio_vercel(username: str, base_domain: str) -> dict:
     if not VERCEL_TOKEN or not VERCEL_PROJECT_ID:
         raise ValueError("Faltan VERCEL_TOKEN o VERCEL_PROJECT_ID")
 
-    subdominio = f"{username}.{BASE_DOMAIN}"
+    subdominio = f"{username}.{base_domain}"
 
     res = httpx.post(
         f"https://api.vercel.com/v10/projects/{VERCEL_PROJECT_ID}/domains",
@@ -111,7 +116,6 @@ def _agregar_dominio_vercel(username: str) -> dict:
         print(f"[PROVISIONING] ✅ Dominio Vercel agregado: {subdominio}")
         return {"ok": True}
 
-    # Si ya existe tampoco es error crítico
     if "already" in str(data).lower():
         print(f"[PROVISIONING] Dominio Vercel {subdominio} ya existe — ok")
         return {"ok": True, "note": "ya existía"}
@@ -119,13 +123,12 @@ def _agregar_dominio_vercel(username: str) -> dict:
     raise ValueError(f"Vercel error: {data}")
 
 
-def _actualizar_cors_render(username: str) -> dict:
+def _actualizar_cors_render(username: str, base_domain: str) -> dict:
     if not RENDER_API_KEY or not RENDER_SERVICE_ID:
         raise ValueError("Faltan RENDER_API_KEY o RENDER_SERVICE_ID")
 
-    nuevo_origen = f"https://{username}.{BASE_DOMAIN}"
+    nuevo_origen = f"https://{username}.{base_domain}"
 
-    # Obtener env vars actuales
     res = httpx.get(
         f"https://api.render.com/v1/services/{RENDER_SERVICE_ID}/env-vars",
         headers={"Authorization": f"Bearer {RENDER_API_KEY}"},
@@ -137,14 +140,12 @@ def _actualizar_cors_render(username: str) -> dict:
 
     env_vars = res.json()
 
-    # Buscar FRONTEND_URLS actual
     frontend_urls_actual = ""
     for var in env_vars:
         if var.get("envVar", {}).get("key") == "FRONTEND_URLS":
             frontend_urls_actual = var.get("envVar", {}).get("value", "")
             break
 
-    # Agregar nuevo origen si no existe
     urls = [u.strip() for u in frontend_urls_actual.split(",") if u.strip()]
     if nuevo_origen in urls:
         print(f"[PROVISIONING] CORS {nuevo_origen} ya existe — ok")
@@ -153,7 +154,6 @@ def _actualizar_cors_render(username: str) -> dict:
     urls.append(nuevo_origen)
     nuevo_valor = ",".join(urls)
 
-    # Actualizar
     res2 = httpx.put(
         f"https://api.render.com/v1/services/{RENDER_SERVICE_ID}/env-vars",
         headers={
