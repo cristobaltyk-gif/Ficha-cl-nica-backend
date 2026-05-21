@@ -206,7 +206,8 @@ def borrar_suscripcion(centro_id: str):
             cur.execute("DELETE FROM suscripciones WHERE centro_id = %s", (centro_id,))
             conn.commit()
     return {"ok": True, "deleted": centro_id}
-    @router.patch("/suscripciones/{centro_id}/roles")
+    
+@router.patch("/suscripciones/{centro_id}/roles")
 def modificar_roles(centro_id: str, data: dict):
     s = get_suscripcion(centro_id)
     if not s:
