@@ -1,6 +1,6 @@
 """
 modules/superadmin/deprovisioning_service.py
-Elimina infraestructura de externos completos al borrar suscripción.
+Elimina infraestructura de externos completos y centros al borrar suscripción.
 Llama a Cloudflare, Vercel y Render APIs en secuencia.
 """
 from __future__ import annotations
@@ -14,52 +14,52 @@ VERCEL_PROJECT_ID  = os.getenv("VERCEL_PROJECT_ID")
 RENDER_API_KEY     = os.getenv("RENDER_API_KEY")
 RENDER_SERVICE_ID  = os.getenv("RENDER_SERVICE_ID")
 
-BASE_DOMAIN = "reservas.icarticular.cl"
+BASE_DOMAIN_EXTERNO = "reservas.icarticular.cl"
+BASE_DOMAIN_CENTRO  = "icarticular.cl"
 
 
 def desprovisionar_externo_completo(username: str) -> dict:
-    """
-    Elimina subdominio de un externo_completo.
-    Pasos:
-    1. Cloudflare → elimina CNAME username.reservas.icarticular.cl
-    2. Vercel     → elimina dominio del proyecto
-    3. Render     → elimina de FRONTEND_URLS
-    """
+    """Elimina subdominio → username.reservas.icarticular.cl"""
+    return _desprovisionar(username, BASE_DOMAIN_EXTERNO)
+
+
+def desprovisionar_centro(centro_id: str) -> dict:
+    """Elimina subdominio → centro_id.icarticular.cl"""
+    return _desprovisionar(centro_id, BASE_DOMAIN_CENTRO)
+
+
+def _desprovisionar(username: str, base_domain: str) -> dict:
     results = {}
 
-    # ── 1. CLOUDFLARE ──────────────────────────────────────────
     try:
-        results["cloudflare"] = _eliminar_cname_cloudflare(username)
+        results["cloudflare"] = _eliminar_cname_cloudflare(username, base_domain)
     except Exception as e:
         results["cloudflare"] = {"ok": False, "error": str(e)}
         print(f"[DEPROVISIONING] ❌ Cloudflare error: {e}")
 
-    # ── 2. VERCEL ──────────────────────────────────────────────
     try:
-        results["vercel"] = _eliminar_dominio_vercel(username)
+        results["vercel"] = _eliminar_dominio_vercel(username, base_domain)
     except Exception as e:
         results["vercel"] = {"ok": False, "error": str(e)}
         print(f"[DEPROVISIONING] ❌ Vercel error: {e}")
 
-    # ── 3. RENDER ──────────────────────────────────────────────
     try:
-        results["render"] = _eliminar_cors_render(username)
+        results["render"] = _eliminar_cors_render(username, base_domain)
     except Exception as e:
         results["render"] = {"ok": False, "error": str(e)}
         print(f"[DEPROVISIONING] ❌ Render error: {e}")
 
     ok = all(r.get("ok") for r in results.values())
-    print(f"[DEPROVISIONING] {'✅' if ok else '⚠️'} {username} — {results}")
+    print(f"[DEPROVISIONING] {'✅' if ok else '⚠️'} {username}.{base_domain} — {results}")
     return {"ok": ok, "details": results}
 
 
-def _eliminar_cname_cloudflare(username: str) -> dict:
+def _eliminar_cname_cloudflare(username: str, base_domain: str) -> dict:
     if not CLOUDFLARE_TOKEN or not CLOUDFLARE_ZONE_ID:
         raise ValueError("Faltan CLOUDFLARE_TOKEN o CLOUDFLARE_ZONE_ID")
 
-    subdominio = f"{username}.{BASE_DOMAIN}"
+    subdominio = f"{username}.{base_domain}"
 
-    # Primero buscar el record ID
     res = httpx.get(
         f"https://api.cloudflare.com/client/v4/zones/{CLOUDFLARE_ZONE_ID}/dns_records",
         headers={"Authorization": f"Bearer {CLOUDFLARE_TOKEN}"},
@@ -76,7 +76,6 @@ def _eliminar_cname_cloudflare(username: str) -> dict:
 
     record_id = records[0]["id"]
 
-    # Eliminar el record
     res2 = httpx.delete(
         f"https://api.cloudflare.com/client/v4/zones/{CLOUDFLARE_ZONE_ID}/dns_records/{record_id}",
         headers={"Authorization": f"Bearer {CLOUDFLARE_TOKEN}"},
@@ -91,11 +90,11 @@ def _eliminar_cname_cloudflare(username: str) -> dict:
     return {"ok": True}
 
 
-def _eliminar_dominio_vercel(username: str) -> dict:
+def _eliminar_dominio_vercel(username: str, base_domain: str) -> dict:
     if not VERCEL_TOKEN or not VERCEL_PROJECT_ID:
         raise ValueError("Faltan VERCEL_TOKEN o VERCEL_PROJECT_ID")
 
-    subdominio = f"{username}.{BASE_DOMAIN}"
+    subdominio = f"{username}.{base_domain}"
 
     res = httpx.delete(
         f"https://api.vercel.com/v9/projects/{VERCEL_PROJECT_ID}/domains/{subdominio}",
@@ -114,13 +113,12 @@ def _eliminar_dominio_vercel(username: str) -> dict:
     raise ValueError(f"Vercel delete error: {res.text}")
 
 
-def _eliminar_cors_render(username: str) -> dict:
+def _eliminar_cors_render(username: str, base_domain: str) -> dict:
     if not RENDER_API_KEY or not RENDER_SERVICE_ID:
         raise ValueError("Faltan RENDER_API_KEY o RENDER_SERVICE_ID")
 
-    origen = f"https://{username}.{BASE_DOMAIN}"
+    origen = f"https://{username}.{base_domain}"
 
-    # Obtener env vars actuales
     res = httpx.get(
         f"https://api.render.com/v1/services/{RENDER_SERVICE_ID}/env-vars",
         headers={"Authorization": f"Bearer {RENDER_API_KEY}"},
