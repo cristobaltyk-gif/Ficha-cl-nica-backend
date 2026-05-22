@@ -69,6 +69,7 @@ from agenda.bloqueo_router                          import router as bloqueo_rou
 from modules.suscripciones.suscripcion_router       import router as suscripcion_router
 from modules.superadmin.superadmin_router           import router as superadmin_router
 from modules.superadmin.centros_router import router as centros_router, router_interno as centros_interno_router
+from modules.profesionales.firma_router      import router as firma_router
 
 # ==========================
 # APP CORE
@@ -130,6 +131,7 @@ app.include_router(suscripcion_router)
 app.include_router(superadmin_router)
 app.include_router(centros_router)
 app.include_router(centros_interno_router)
+app.include_router(firma_router)
 
 # ==========================
 # HEALTHCHECK
