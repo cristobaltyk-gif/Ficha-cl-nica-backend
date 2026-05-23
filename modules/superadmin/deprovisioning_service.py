@@ -19,12 +19,10 @@ BASE_DOMAIN_CENTRO  = "icarticular.cl"
 
 
 def desprovisionar_externo_completo(username: str) -> dict:
-    """Elimina subdominio → username.reservas.icarticular.cl"""
     return _desprovisionar(username, BASE_DOMAIN_EXTERNO)
 
 
 def desprovisionar_centro(centro_id: str) -> dict:
-    """Elimina subdominio → centro_id.icarticular.cl"""
     return _desprovisionar(centro_id, BASE_DOMAIN_CENTRO)
 
 
@@ -32,7 +30,7 @@ def _desprovisionar(username: str, base_domain: str) -> dict:
     results = {}
 
     try:
-        results["cloudflare"] = _eliminar_cname_cloudflare(username, base_domain)
+        results["cloudflare"] = _eliminar_registros_cloudflare(username, base_domain)
     except Exception as e:
         results["cloudflare"] = {"ok": False, "error": str(e)}
         print(f"[DEPROVISIONING] ❌ Cloudflare error: {e}")
@@ -54,39 +52,45 @@ def _desprovisionar(username: str, base_domain: str) -> dict:
     return {"ok": ok, "details": results}
 
 
-def _eliminar_cname_cloudflare(username: str, base_domain: str) -> dict:
+def _eliminar_registros_cloudflare(username: str, base_domain: str) -> dict:
     if not CLOUDFLARE_TOKEN or not CLOUDFLARE_ZONE_ID:
         raise ValueError("Faltan CLOUDFLARE_TOKEN o CLOUDFLARE_ZONE_ID")
 
     subdominio = f"{username}.{base_domain}"
+    headers    = {"Authorization": f"Bearer {CLOUDFLARE_TOKEN}"}
 
-    res = httpx.get(
+    # ── Eliminar CNAME ──
+    res_cname = httpx.get(
         f"https://api.cloudflare.com/client/v4/zones/{CLOUDFLARE_ZONE_ID}/dns_records",
-        headers={"Authorization": f"Bearer {CLOUDFLARE_TOKEN}"},
+        headers=headers,
         params={"name": subdominio, "type": "CNAME"},
         timeout=10,
     )
+    for record in res_cname.json().get("result", []):
+        httpx.delete(
+            f"https://api.cloudflare.com/client/v4/zones/{CLOUDFLARE_ZONE_ID}/dns_records/{record['id']}",
+            headers=headers, timeout=10,
+        )
+        print(f"[DEPROVISIONING] ✅ CNAME eliminado: {subdominio}")
 
-    data = res.json()
-    records = data.get("result", [])
+    # ── Eliminar TXT de verificación ──
+    # Vercel crea TXT con nombre _vercel.subdominio o _vercel.base_domain
+    for txt_name in [f"_vercel.{subdominio}", f"_vercel.{base_domain}"]:
+        res_txt = httpx.get(
+            f"https://api.cloudflare.com/client/v4/zones/{CLOUDFLARE_ZONE_ID}/dns_records",
+            headers=headers,
+            params={"name": txt_name, "type": "TXT"},
+            timeout=10,
+        )
+        for record in res_txt.json().get("result", []):
+            # Solo eliminar si el valor contiene el username para no borrar TXT de otros
+            if username in record.get("content", ""):
+                httpx.delete(
+                    f"https://api.cloudflare.com/client/v4/zones/{CLOUDFLARE_ZONE_ID}/dns_records/{record['id']}",
+                    headers=headers, timeout=10,
+                )
+                print(f"[DEPROVISIONING] ✅ TXT eliminado: {txt_name}")
 
-    if not records:
-        print(f"[DEPROVISIONING] CNAME {subdominio} no encontrado — ok")
-        return {"ok": True, "note": "no existía"}
-
-    record_id = records[0]["id"]
-
-    res2 = httpx.delete(
-        f"https://api.cloudflare.com/client/v4/zones/{CLOUDFLARE_ZONE_ID}/dns_records/{record_id}",
-        headers={"Authorization": f"Bearer {CLOUDFLARE_TOKEN}"},
-        timeout=10,
-    )
-
-    data2 = res2.json()
-    if not data2.get("success"):
-        raise ValueError(f"Cloudflare delete error: {data2.get('errors')}")
-
-    print(f"[DEPROVISIONING] ✅ CNAME eliminado: {subdominio}")
     return {"ok": True}
 
 
@@ -119,12 +123,12 @@ def _eliminar_cors_render(username: str, base_domain: str) -> dict:
 
     origen = f"https://{username}.{base_domain}"
 
+    # ── Leer TODAS las variables actuales ──
     res = httpx.get(
         f"https://api.render.com/v1/services/{RENDER_SERVICE_ID}/env-vars",
         headers={"Authorization": f"Bearer {RENDER_API_KEY}"},
         timeout=10,
     )
-
     if not res.is_success:
         raise ValueError(f"Render GET error: {res.text}")
 
@@ -145,13 +149,23 @@ def _eliminar_cors_render(username: str, base_domain: str) -> dict:
     urls.remove(origen)
     nuevo_valor = ",".join(urls)
 
+    # ── PUT con TODAS las variables — solo cambia FRONTEND_URLS ──
+    todas_las_vars = []
+    for var in env_vars:
+        key = var.get("envVar", {}).get("key")
+        val = var.get("envVar", {}).get("value", "")
+        if key == "FRONTEND_URLS":
+            todas_las_vars.append({"key": key, "value": nuevo_valor})
+        elif key:
+            todas_las_vars.append({"key": key, "value": val})
+
     res2 = httpx.put(
         f"https://api.render.com/v1/services/{RENDER_SERVICE_ID}/env-vars",
         headers={
             "Authorization": f"Bearer {RENDER_API_KEY}",
             "Content-Type":  "application/json",
         },
-        json=[{"key": "FRONTEND_URLS", "value": nuevo_valor}],
+        json=todas_las_vars,
         timeout=10,
     )
 
