@@ -40,9 +40,9 @@ def _provisionar(username: str, base_domain: str) -> dict:
 
     # ── 2. CLOUDFLARE — con datos dinámicos de Vercel ──
     try:
-        cname_target  = vercel_result.get("cname", "cname.vercel-dns.com")
-        txt_name      = vercel_result.get("txt_name")
-        txt_value     = vercel_result.get("txt_value")
+        cname_target = vercel_result.get("cname", "cname.vercel-dns.com")
+        txt_name     = vercel_result.get("txt_name")
+        txt_value    = vercel_result.get("txt_value")
         results["cloudflare"] = _crear_registros_cloudflare(
             username, base_domain, cname_target, txt_name, txt_value
         )
@@ -50,7 +50,7 @@ def _provisionar(username: str, base_domain: str) -> dict:
         results["cloudflare"] = {"ok": False, "error": str(e)}
         print(f"[PROVISIONING] ❌ Cloudflare error: {e}")
 
-    # ── 3. RENDER ──
+    # ── 3. RENDER — solo agrega la nueva URL, no toca nada más ──
     try:
         results["render"] = _actualizar_cors_render(username, base_domain)
     except Exception as e:
@@ -68,7 +68,6 @@ def _agregar_dominio_vercel(username: str, base_domain: str) -> dict:
 
     subdominio = f"{username}.{base_domain}"
 
-    # Agregar dominio al proyecto
     res = httpx.post(
         f"https://api.vercel.com/v10/projects/{VERCEL_PROJECT_ID}/domains",
         headers={
@@ -80,7 +79,6 @@ def _agregar_dominio_vercel(username: str, base_domain: str) -> dict:
     )
 
     data = res.json()
-
     already_exists = res.status_code not in (200, 201) and "already" in str(data).lower()
 
     if res.status_code not in (200, 201) and not already_exists:
@@ -89,7 +87,7 @@ def _agregar_dominio_vercel(username: str, base_domain: str) -> dict:
     if already_exists:
         print(f"[PROVISIONING] Dominio Vercel {subdominio} ya existe — consultando detalles")
 
-    # Consultar detalles del dominio para obtener CNAME y TXT dinámicos
+    # Consultar detalles para obtener CNAME y TXT dinámicos
     res2 = httpx.get(
         f"https://api.vercel.com/v9/projects/{VERCEL_PROJECT_ID}/domains/{subdominio}",
         headers={"Authorization": f"Bearer {VERCEL_TOKEN}"},
@@ -100,13 +98,12 @@ def _agregar_dominio_vercel(username: str, base_domain: str) -> dict:
     print(f"[PROVISIONING] Vercel domain details: {details}")
 
     # Extraer CNAME target dinámico
-    cname_target = details.get("apexName") and f"cname.vercel-dns.com" or "cname.vercel-dns.com"
+    cname_target = details.get("cname") or "cname.vercel-dns.com"
 
-    # Extraer registros de verificación
+    # Extraer TXT de verificación
     txt_name  = None
     txt_value = None
-    verification = details.get("verification") or []
-    for v in verification:
+    for v in (details.get("verification") or []):
         if v.get("type") == "TXT":
             txt_name  = v.get("domain")
             txt_value = v.get("value")
@@ -190,17 +187,18 @@ def _actualizar_cors_render(username: str, base_domain: str) -> dict:
 
     nuevo_origen = f"https://{username}.{base_domain}"
 
+    # ── Leer TODAS las variables actuales ──
     res = httpx.get(
         f"https://api.render.com/v1/services/{RENDER_SERVICE_ID}/env-vars",
         headers={"Authorization": f"Bearer {RENDER_API_KEY}"},
         timeout=10,
     )
-
     if not res.is_success:
         raise ValueError(f"Render GET error: {res.text}")
 
     env_vars = res.json()
 
+    # Buscar FRONTEND_URLS y actualizar solo esa
     frontend_urls_actual = ""
     for var in env_vars:
         if var.get("envVar", {}).get("key") == "FRONTEND_URLS":
@@ -215,13 +213,29 @@ def _actualizar_cors_render(username: str, base_domain: str) -> dict:
     urls.append(nuevo_origen)
     nuevo_valor = ",".join(urls)
 
+    # ── Construir lista completa con TODAS las vars + FRONTEND_URLS actualizado ──
+    todas_las_vars = []
+    frontend_incluido = False
+    for var in env_vars:
+        key = var.get("envVar", {}).get("key")
+        val = var.get("envVar", {}).get("value", "")
+        if key == "FRONTEND_URLS":
+            todas_las_vars.append({"key": key, "value": nuevo_valor})
+            frontend_incluido = True
+        elif key:
+            todas_las_vars.append({"key": key, "value": val})
+
+    if not frontend_incluido:
+        todas_las_vars.append({"key": "FRONTEND_URLS", "value": nuevo_valor})
+
+    # ── PUT con TODAS las variables — no se pierde ninguna ──
     res2 = httpx.put(
         f"https://api.render.com/v1/services/{RENDER_SERVICE_ID}/env-vars",
         headers={
             "Authorization": f"Bearer {RENDER_API_KEY}",
             "Content-Type":  "application/json",
         },
-        json=[{"key": "FRONTEND_URLS", "value": nuevo_valor}],
+        json=todas_las_vars,
         timeout=10,
     )
 
