@@ -14,7 +14,7 @@ VERCEL_PROJECT_ID  = os.getenv("VERCEL_PROJECT_ID")
 RENDER_API_KEY     = os.getenv("RENDER_API_KEY")
 RENDER_SERVICE_ID  = os.getenv("RENDER_SERVICE_ID")
 
-BASE_DOMAIN_EXTERNO = "reservas.icarticular.cl"
+BASE_DOMAIN_EXTERNO = "icarticular.cl"
 BASE_DOMAIN_CENTRO  = "icarticular.cl"
 
 
