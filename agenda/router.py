@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Query, HTTPException
+import base64
+import json as _json
+from fastapi import APIRouter, Query, HTTPException, UploadFile, File, Form
 from agenda import service
 from agenda.models import (
     OccupancyResponse,
@@ -10,6 +12,8 @@ from agenda.models import (
     RescheduleRequest,
     MutationResult,
 )
+from agenda.store import set_slot
+from db.supabase_client import _get_conn
 
 router = APIRouter(prefix="/agenda", tags=["agenda"])
 
@@ -73,4 +77,77 @@ def reschedule_slot(payload: RescheduleRequest):
         return service.reschedule(payload)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-        
+
+
+# ======================================================
+# DERMATOLOGÍA — FOTOS
+# ======================================================
+
+@router.post("/dermatologia/fotos", summary="Subir fotos dermatología al slot")
+async def subir_fotos_dermatologia(
+    rut:          str        = Form(...),
+    date:         str        = Form(...),
+    time:         str        = Form(...),
+    professional: str        = Form(...),
+    foto1:        UploadFile = File(None),
+    comentario1:  str        = Form(""),
+    foto2:        UploadFile = File(None),
+    comentario2:  str        = Form(""),
+):
+    try:
+        fotos = []
+        for foto, comentario in [(foto1, comentario1), (foto2, comentario2)]:
+            if foto and foto.filename:
+                contenido = await foto.read()
+                fotos.append({
+                    "data":       base64.b64encode(contenido).decode("utf-8"),
+                    "comentario": comentario,
+                })
+
+        # Leer extra actual del slot
+        with _get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT extra, status FROM slots WHERE date=%s AND time=%s AND professional=%s",
+                    (date, time, professional)
+                )
+                row = cur.fetchone()
+                extra  = dict(row["extra"]) if row and row["extra"] else {}
+                status = row["status"] if row else "reserved"
+
+        extra["fotos_dermatologia"] = fotos
+
+        set_slot(
+            date=date, time=time, professional=professional,
+            status=status, rut=rut, extra=extra
+        )
+
+        return {"ok": True, "fotos": len(fotos)}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/dermatologia/fotos", summary="Obtener fotos dermatología del slot")
+def get_fotos_dermatologia(
+    rut:  str = Query(...),
+    date: str = Query(...),
+    time: str = Query(...),
+):
+    try:
+        with _get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT extra FROM slots WHERE date=%s AND time=%s AND rut=%s",
+                    (date, time, rut)
+                )
+                row = cur.fetchone()
+
+        if not row or not row["extra"]:
+            return {"fotos": []}
+
+        extra = row["extra"] if isinstance(row["extra"], dict) else _json.loads(row["extra"])
+        return {"fotos": extra.get("fotos_dermatologia", [])}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
