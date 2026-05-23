@@ -134,8 +134,8 @@ def crear_suscripcion(data: dict):
         except Exception as e:
             print(f"[SUPERADMIN] ⚠️ Provisioning centro error: {e}")
 
-    # Si es externo_completo → provisionar
-    if plan == "externo_completo":
+    # Si es externo con subdominio → provisionar
+    elif plan not in ("externo_base", ""):
         try:
             from modules.superadmin.provisioning_service import provisionar_externo_completo
             provisionar_externo_completo(centro_id)
@@ -184,16 +184,10 @@ def borrar_suscripcion(centro_id: str):
     if not s:
         raise HTTPException(404, "Suscripción no encontrada")
 
-    # ── Desprovisionar según plan ──
-    if s.get("plan") == "externo_completo":
-        try:
-            from modules.superadmin.deprovisioning_service import desprovisionar_externo_completo
-            desprovisionar_externo_completo(centro_id)
-            print(f"[SUPERADMIN] ✅ Infraestructura externo eliminada para {centro_id}")
-        except Exception as e:
-            print(f"[SUPERADMIN] ⚠️ Deprovisioning externo error: {e}")
+    plan = s.get("plan", "")
 
-    elif s.get("plan") == "centro":
+    # Desprovisionar según plan — centro_id ES el subdominio
+    if plan == "centro":
         try:
             from modules.superadmin.deprovisioning_service import desprovisionar_centro
             desprovisionar_centro(centro_id)
@@ -201,77 +195,33 @@ def borrar_suscripcion(centro_id: str):
         except Exception as e:
             print(f"[SUPERADMIN] ⚠️ Deprovisioning centro error: {e}")
 
+    elif plan not in ("externo_base", ""):
+        # externo_completo, dermatologia, reumatologia — todos tienen subdominio
+        try:
+            from modules.superadmin.deprovisioning_service import desprovisionar_externo_completo
+            desprovisionar_externo_completo(centro_id)
+            print(f"[SUPERADMIN] ✅ Infraestructura externo eliminada para {centro_id}")
+        except Exception as e:
+            print(f"[SUPERADMIN] ⚠️ Deprovisioning externo error: {e}")
+
     with _get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM suscripciones WHERE centro_id = %s", (centro_id,))
             conn.commit()
+
     return {"ok": True, "deleted": centro_id}
-    
-@router.patch("/suscripciones/{centro_id}/roles")
-def modificar_roles(centro_id: str, data: dict):
+
+
+@router.post("/suscripciones/{centro_id}/activar")
+def activar_suscripcion(centro_id: str):
     s = get_suscripcion(centro_id)
     if not s:
         raise HTTPException(404, "Suscripción no encontrada")
-
-    roles    = data.get("roles", s.get("roles", {}))
-    desc_pct = s.get("descuento_pct", 0)
-
-    if s.get("plan") == "centro":
-        precios = calcular_precio_centro(roles, desc_pct)
-    else:
-        precio_base = PRECIOS_EXTERNO.get(s["plan"], 35000)
-        precios = {
-            "precio_base":  precio_base,
-            "precio_final": precio_base - int(precio_base * desc_pct / 100),
-        }
-
+    nueva_fecha = (date.today() + timedelta(days=30)).isoformat()
     update_suscripcion(centro_id, {
-        "roles":       json.dumps(roles) if isinstance(roles, dict) else roles,
-        "precio_base": precios["precio_base"],
-        "precio_final":precios["precio_final"],
+        "estado":            "activo",
+        "fecha_vencimiento": nueva_fecha,
     })
-
-    if s.get("plan") == "centro":
-        try:
-            centro = get_centro(centro_id)
-            if centro:
-                centro["max_usuarios"] = roles
-                save_centro(centro)
-        except Exception as e:
-            print(f"[SUPERADMIN] Error actualizando centro: {e}")
-
-    return {
-        "ok":          True,
-        "roles":       roles,
-        "precio_base": precios["precio_base"],
-        "precio_final":precios["precio_final"],
-    }
-
-
-@router.patch("/suscripciones/{centro_id}/estado")
-def cambiar_estado(centro_id: str, data: dict):
-    estado = data.get("estado")
-    if estado not in ("activo", "vencido", "suspendido"):
-        raise HTTPException(400, "Estado inválido")
-    update_suscripcion(centro_id, {"estado": estado})
-    try:
-        centro = get_centro(centro_id)
-        if centro:
-            centro["activo"] = (estado == "activo")
-            save_centro(centro)
-    except Exception as e:
-        print(f"[SUPERADMIN] Error sincronizando estado centro: {e}")
-    try:
-        from modules.suscripciones.suscripcion_scheduler import (
-            _suspender_usuarios_centro,
-            _reactivar_usuarios_centro,
-        )
-        if estado == "activo":
-            _reactivar_usuarios_centro(centro_id)
-        else:
-            _suspender_usuarios_centro(centro_id)
-    except Exception as e:
-        print(f"[SUPERADMIN] Error actualizando usuarios: {e}")
     return {"ok": True}
 
 
