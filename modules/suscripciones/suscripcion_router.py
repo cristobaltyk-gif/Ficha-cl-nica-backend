@@ -24,8 +24,25 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "https://admin.icarticular.cl")
 async def get_tipo(scope: str):
     s = get_suscripcion(scope)
     if not s:
-        return {"tipo": "externo_completo"}
-    return {"tipo": s.get("plan", "externo_completo")}
+        return {"tipo": "externo_completo", "especialidad": None}
+
+    plan = s.get("plan", "externo_completo")
+
+    especialidad = None
+    try:
+        from db.supabase_client import _get_conn
+        with _get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT specialty FROM profesionales WHERE id = %s",
+                    (scope,)
+                )
+                row = cur.fetchone()
+                especialidad = row.get("specialty") if row else None
+    except Exception as e:
+        print(f"[TIPO] Error consultando especialidad: {e}")
+
+    return {"tipo": plan, "especialidad": especialidad}
 
 
 @router.api_route("/retorno", methods=["GET", "POST"])
