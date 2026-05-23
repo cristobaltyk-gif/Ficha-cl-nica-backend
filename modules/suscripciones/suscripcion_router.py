@@ -12,7 +12,7 @@ from datetime import date, timedelta
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
 
-from db.supabase_client import get_suscripcion, update_suscripcion
+from db.supabase_client import get_suscripcion, update_suscripcion, _get_conn
 
 router = APIRouter(prefix="/api/suscripciones", tags=["Suscripciones"])
 
@@ -30,13 +30,15 @@ async def get_tipo(scope: str):
 
     especialidad = None
     try:
-        from db.supabase_client import _get_conn
         with _get_conn() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT specialty FROM profesionales WHERE id = %s",
-                    (scope,)
-                )
+                cur.execute("""
+                    SELECT p.specialty FROM profesionales p
+                    JOIN usuarios u ON u.professional = p.id
+                    WHERE u.role->>'scope' = %s
+                    AND u.id != 'public_web'
+                    LIMIT 1
+                """, (scope,))
                 row = cur.fetchone()
                 especialidad = row.get("specialty") if row else None
     except Exception as e:
@@ -165,22 +167,33 @@ def _crear_usuario_admin_centro(centro_id: str, s: dict) -> tuple[str, str]:
             "allow": ["agenda", "pacientes", "atencion", "documentos", "administracion"],
             "scope": centro_id,
         }
-    elif plan == "externo_completo":
-        username = centro_id
-        role = {
-            "name":  "medico",
-            "entry": "/medico",
-            "allow": ["agenda", "pacientes", "atencion", "documentos"],
-            "scope": centro_id,
-        }
     else:
-        username = centro_id
-        role = {
-            "name":  "medico",
-            "entry": "/medico",
-            "allow": ["agenda", "pacientes", "atencion", "documentos"],
-            "scope": "externo",
-        }
+        # Buscar el usuario real que ya tiene este scope
+        username = centro_id  # fallback
+        role = None
+        try:
+            with _get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT id, role FROM usuarios
+                        WHERE role->>'scope' = %s
+                        AND id != 'public_web'
+                        LIMIT 1
+                    """, (centro_id,))
+                    row = cur.fetchone()
+                    if row:
+                        username = row["id"]
+                        role     = row["role"] if isinstance(row["role"], dict) else json.loads(row["role"])
+        except Exception as e:
+            print(f"[WEBHOOK] Error buscando usuario real: {e}")
+
+        if role is None:
+            role = {
+                "name":  "medico",
+                "entry": "/medico",
+                "allow": ["agenda", "pacientes", "atencion", "documentos"],
+                "scope": centro_id,
+            }
 
     password = secrets.token_urlsafe(10)
     users    = get_users()
@@ -189,7 +202,7 @@ def _crear_usuario_admin_centro(centro_id: str, s: dict) -> tuple[str, str]:
         save_user(username, {
             "password":     password,
             "active":       True,
-            "professional": centro_id,
+            "professional": username,
             "role":         role,
         })
         print(f"[WEBHOOK] Usuario creado: {username} — plan: {plan}")
@@ -197,5 +210,6 @@ def _crear_usuario_admin_centro(centro_id: str, s: dict) -> tuple[str, str]:
         password = secrets.token_urlsafe(10)
         users[username]["password"] = password
         save_user(username, users[username])
+        print(f"[WEBHOOK] Contraseña actualizada: {username}")
 
     return username, password
