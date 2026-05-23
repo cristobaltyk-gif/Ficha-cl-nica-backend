@@ -23,6 +23,42 @@ def chile_today() -> str:
     return datetime.now(ZoneInfo("America/Santiago")).date().isoformat()
 
 
+def _migrar_fotos_slot_a_evento(rut: str, fecha: str, hora: str) -> dict:
+    """
+    Lee fotos_dermatologia del slot y las retorna para incluir en el evento.
+    Luego limpia el slot.
+    """
+    try:
+        with _get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT extra FROM slots WHERE date=%s AND time=%s AND rut=%s",
+                    (fecha, hora, rut)
+                )
+                row = cur.fetchone()
+                if not row or not row["extra"]:
+                    return {}
+
+                extra = row["extra"] if isinstance(row["extra"], dict) else json.loads(row["extra"])
+                fotos = extra.get("fotos_dermatologia", [])
+                if not fotos:
+                    return {}
+
+                # Limpiar fotos del slot
+                cur.execute("""
+                    UPDATE slots SET extra = extra - 'fotos_dermatologia'
+                    WHERE date=%s AND time=%s AND rut=%s
+                """, (fecha, hora, rut))
+                conn.commit()
+
+                print(f"[DERMATOLOGIA] ✅ {len(fotos)} foto(s) migradas al evento de {rut}")
+                return {"fotos_dermatologia": fotos}
+
+    except Exception as e:
+        print(f"[DERMATOLOGIA] Error migrando fotos: {e}")
+        return {}
+
+
 @router.put("")
 def update_clinical_event(
     data: FichaEventoCreate,
@@ -48,7 +84,7 @@ def update_clinical_event(
             if not row:
                 raise HTTPException(status_code=404, detail="Evento clínico no encontrado")
 
-            created_at = str(row["created_at"])
+            created_at   = str(row["created_at"])
             created_date = created_at.split("T")[0][:10]
 
             if created_date != chile_today():
@@ -59,6 +95,11 @@ def update_clinical_event(
 
             evento_actual = dict(row["contenido"])
             evento_actual.update(data.dict())
+
+            # Migrar fotos de dermatología si existen en el slot
+            fotos = _migrar_fotos_slot_a_evento(rut, data.fecha, data.hora)
+            if fotos:
+                evento_actual.update(fotos)
 
             cur.execute("""
                 UPDATE eventos
