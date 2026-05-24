@@ -12,7 +12,6 @@ LOCK = Lock()
 
 
 def _load_all() -> Dict[str, Any]:
-    """Lee desde disco como fallback legacy."""
     if not DATA_PATH.exists():
         DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
         DATA_PATH.write_text("{}", encoding="utf-8")
@@ -28,7 +27,6 @@ def save_professionals(data: Dict[str, Any]) -> None:
 
 
 def load_professionals() -> Dict[str, Any]:
-    """Devuelve profesionales activos con schedule desde PostgreSQL."""
     from db.supabase_client import get_profesionales
     return get_profesionales()
 
@@ -40,13 +38,17 @@ def set_day_blocks(
     blocks: List[Dict[str, str]],
     slot_minutes: int = 15
 ) -> None:
-    from db.supabase_client import _get_conn, get_profesionales, save_profesional
+    from db.supabase_client import get_profesionales, save_profesional
     profs = get_profesionales()
     prof  = profs.get(professional_id)
     if not prof:
         raise ValueError("Profesional no existe")
     schedule = prof.get("schedule") or {}
-    schedule["slotMinutes"] = slot_minutes
+    # Solo inicializa slotMinutes si no existe — nunca sobreescribe
+    if "slotMinutes" not in schedule:
+        schedule["slotMinutes"] = slot_minutes
+    if "slotMinutesTelemed" not in schedule:
+        schedule["slotMinutesTelemed"] = slot_minutes
     schedule.setdefault("days", {})[weekday] = blocks
     prof["schedule"] = schedule
     save_profesional(professional_id, prof)
@@ -93,4 +95,3 @@ def unblock_date(*, professional_id: str, date_iso: str) -> None:
 def list_professionals() -> List[Dict[str, Any]]:
     from db.supabase_client import get_profesionales
     return list(get_profesionales().values())
-    
