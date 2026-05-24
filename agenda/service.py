@@ -30,10 +30,6 @@ from agenda.utils import (
 DEFAULT_INTERVAL_MIN = 15
 
 
-# ══════════════════════════════════════════════════════════════
-# HELPERS — ahora leen desde PostgreSQL
-# ══════════════════════════════════════════════════════════════
-
 def _load_admin(rut: str) -> dict | None:
     from db.supabase_client import get_paciente
     return get_paciente(rut)
@@ -79,7 +75,6 @@ def _enviar_confirmacion_reserva(rut, date, time, professional) -> None:
         edad        = _calcular_edad(admin.get("fecha_nacimiento", ""))
         sexo        = admin.get("sexo", "")
 
-        # Obtener rol del profesional para filtrar prediagnóstico
         users = get_users()
         u = users.get(professional, {})
         rol_prof = (u.get("role") or {}).get("name", "")
@@ -155,6 +150,7 @@ def create_slot(req: CreateSlotRequest) -> MutationResult:
         professional=professional,
         status=req.status,
         rut=rut,
+        tipo=req.tipo,
     )
 
     _enviar_confirmacion_reserva(rut, req.date, req.time, professional)
@@ -164,7 +160,7 @@ def create_slot(req: CreateSlotRequest) -> MutationResult:
         message="Slot creado",
         date=req.date,
         professional=professional,
-        slot={"time": req.time, "status": req.status, "rut": rut},
+        slot={"time": req.time, "status": req.status, "rut": rut, "tipo": req.tipo},
     )
 
 
@@ -182,7 +178,8 @@ def confirm_slot(req: ConfirmSlotRequest) -> MutationResult:
     if slot.get("status") != "reserved":
         raise ValueError("Solo se pueden confirmar slots reservados.")
 
-    rut = slot.get("rut")
+    rut  = slot.get("rut")
+    tipo = slot.get("tipo", "presencial")
 
     store.set_slot(
         date=req.date,
@@ -190,6 +187,7 @@ def confirm_slot(req: ConfirmSlotRequest) -> MutationResult:
         professional=professional,
         status="confirmed",
         rut=rut,
+        tipo=tipo,
     )
 
     return MutationResult(
@@ -197,7 +195,7 @@ def confirm_slot(req: ConfirmSlotRequest) -> MutationResult:
         message="Slot confirmado",
         date=req.date,
         professional=professional,
-        slot={"time": req.time, "status": "confirmed", "rut": rut},
+        slot={"time": req.time, "status": "confirmed", "rut": rut, "tipo": tipo},
     )
 
 
@@ -245,12 +243,14 @@ def reschedule(req: RescheduleRequest) -> MutationResult:
     if not slot or slot.get("status") not in ("reserved", "confirmed"):
         raise ValueError("No existe un slot válido para reprogramar.")
 
-    rut = slot.get("rut")
+    rut  = slot.get("rut")
+    tipo = slot.get("tipo", "presencial")
 
     store.set_slot(
         date=t.date, time=t.time,
         professional=professional,
         status=slot["status"], rut=rut,
+        tipo=tipo,
     )
     store.clear_slot(
         date=f.date, time=f.time,
@@ -262,7 +262,7 @@ def reschedule(req: RescheduleRequest) -> MutationResult:
         message="Slot reprogramado",
         date=t.date,
         professional=professional,
-        slot={"time": t.time, "status": slot["status"], "rut": rut},
+        slot={"time": t.time, "status": slot["status"], "rut": rut, "tipo": tipo},
         moved_from={"date": f.date, "time": f.time},
         moved_to={"date": t.date, "time": t.time},
     )
@@ -271,4 +271,3 @@ def reschedule(req: RescheduleRequest) -> MutationResult:
 def daily_cleanup() -> None:
     keep_from = today_utc().isoformat()
     store.cleanup_past(keep_from_date=keep_from)
-    
