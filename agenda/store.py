@@ -21,20 +21,10 @@ def _utc_iso() -> str:
 # ══════════════════════════════════════════════════════════════
 
 def read_day(date: str) -> Dict[str, Any]:
-    """
-    Retorna estructura compatible con el frontend:
-    {
-        professional_id: {
-            "slots": {
-                "HH:MM": {"status": ..., "rut": ..., ...}
-            }
-        }
-    }
-    """
     with _get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT professional, time, status, rut, extra
+                SELECT professional, time, status, rut, extra, tipo
                 FROM slots
                 WHERE date = %s
             """, (date,))
@@ -45,7 +35,10 @@ def read_day(date: str) -> Dict[str, Any]:
         prof = row["professional"]
         if prof not in result:
             result[prof] = {"slots": {}}
-        slot = {"status": row["status"]}
+        slot = {
+            "status": row["status"],
+            "tipo":   row["tipo"] or "presencial",
+        }
         if row["rut"]:
             slot["rut"] = row["rut"]
         if row["extra"]:
@@ -56,9 +49,6 @@ def read_day(date: str) -> Dict[str, Any]:
 
 
 def read_occupancy(date: str, time: str) -> Dict[str, str]:
-    """
-    Retorna {professional_id: status} para un slot específico.
-    """
     with _get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
@@ -71,22 +61,11 @@ def read_occupancy(date: str, time: str) -> Dict[str, str]:
     return {row["professional"]: row["status"] for row in rows}
 
 
-
 def read_range(date_from: str, date_to: str) -> Dict[str, Any]:
-    """
-    Retorna todos los slots entre dos fechas en UNA sola query.
-    {
-        "YYYY-MM-DD": {
-            professional_id: {
-                "slots": { "HH:MM": {...} }
-            }
-        }
-    }
-    """
     with _get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT date, professional, time, status, rut, extra
+                SELECT date, professional, time, status, rut, extra, tipo
                 FROM slots
                 WHERE date >= %s AND date <= %s
             """, (date_from, date_to))
@@ -100,7 +79,10 @@ def read_range(date_from: str, date_to: str) -> Dict[str, Any]:
             result[date] = {}
         if prof not in result[date]:
             result[date][prof] = {"slots": {}}
-        slot = {"status": row["status"]}
+        slot = {
+            "status": row["status"],
+            "tipo":   row["tipo"] or "presencial",
+        }
         if row["rut"]:
             slot["rut"] = row["rut"]
         if row["extra"]:
@@ -108,6 +90,7 @@ def read_range(date_from: str, date_to: str) -> Dict[str, Any]:
         result[date][prof]["slots"][row["time"]] = slot
 
     return result
+
 
 # ══════════════════════════════════════════════════════════════
 # ESCRITURA
@@ -121,26 +104,30 @@ def set_slot(
     status: str,
     rut: Optional[str] = None,
     extra: Optional[Dict[str, Any]] = None,
+    tipo: str = "presencial",
 ) -> None:
     """
     Crea o actualiza un slot.
     PostgreSQL maneja la concurrencia — ON CONFLICT actualiza atómicamente.
+    tipo: 'presencial' (default) o 'telemedicina'
     """
     import json
     with _get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                INSERT INTO slots (date, time, professional, status, rut, extra, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO slots (date, time, professional, status, rut, extra, tipo, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (date, time, professional)
                 DO UPDATE SET
                     status     = EXCLUDED.status,
                     rut        = EXCLUDED.rut,
                     extra      = EXCLUDED.extra,
+                    tipo       = EXCLUDED.tipo,
                     updated_at = EXCLUDED.updated_at
             """, (
                 date, time, professional, status, rut,
                 json.dumps(extra or {}),
+                tipo,
                 _utc_iso()
             ))
             conn.commit()
@@ -174,31 +161,14 @@ def cleanup_past(*, keep_from_date: str) -> None:
 
 # ══════════════════════════════════════════════════════════════
 # COMPATIBILIDAD — load_store / save_store
-# Mantiene interfaz legacy para control_gratuito y sobrecupo
 # ══════════════════════════════════════════════════════════════
 
 def load_store() -> dict:
-    """
-    Retorna estructura compatible con el código legacy:
-    {
-        "calendar": {
-            "YYYY-MM-DD": {
-                "professional_id": {
-                    "slots": {
-                        "HH:MM": {"status": ..., "rut": ..., ...extra}
-                    }
-                }
-            }
-        },
-        "index_by_time": {}
-    }
-    """
     import json as _json
-    from db.supabase_client import _get_conn
 
     with _get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT date, time, professional, status, rut, extra FROM slots")
+            cur.execute("SELECT date, time, professional, status, rut, extra, tipo FROM slots")
             rows = cur.fetchall()
 
     calendar = {}
@@ -210,7 +180,10 @@ def load_store() -> dict:
         calendar.setdefault(date, {})
         calendar[date].setdefault(prof, {"schedule": {}, "slots": {}})
 
-        slot = {"status": row["status"]}
+        slot = {
+            "status": row["status"],
+            "tipo":   row["tipo"] or "presencial",
+        }
         if row["rut"]:
             slot["rut"] = row["rut"]
         if row["extra"]:
@@ -227,12 +200,7 @@ def load_store() -> dict:
 
 
 def save_store(store: dict) -> None:
-    """
-    Persiste todos los slots del store a PostgreSQL.
-    Reemplaza completamente los slots de las fechas presentes.
-    """
     import json as _json
-    from db.supabase_client import _get_conn
 
     calendar = store.get("calendar", {})
 
@@ -243,15 +211,16 @@ def save_store(store: dict) -> None:
                     for time, slot in prof_data.get("slots", {}).items():
                         status = slot.get("status", "reserved")
                         rut    = slot.get("rut")
-                        extra  = {k: v for k, v in slot.items() if k not in ("status", "rut")}
+                        tipo   = slot.get("tipo", "presencial")
+                        extra  = {k: v for k, v in slot.items() if k not in ("status", "rut", "tipo")}
                         cur.execute("""
-                            INSERT INTO slots (date, time, professional, status, rut, extra, updated_at)
-                            VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                            INSERT INTO slots (date, time, professional, status, rut, extra, tipo, updated_at)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
                             ON CONFLICT (date, time, professional) DO UPDATE SET
                                 status     = EXCLUDED.status,
                                 rut        = EXCLUDED.rut,
                                 extra      = EXCLUDED.extra,
+                                tipo       = EXCLUDED.tipo,
                                 updated_at = EXCLUDED.updated_at
-                        """, (date, time, prof, status, rut, _json.dumps(extra)))
+                        """, (date, time, prof, status, rut, _json.dumps(extra), tipo))
             conn.commit()
-            
