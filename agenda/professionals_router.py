@@ -29,6 +29,11 @@ class BlockDateRequest(BaseModel):
     date: str
 
 
+class SetScheduleConfigRequest(BaseModel):
+    slotMinutes:        int = 15
+    slotMinutesTelemed: int = 15
+
+
 # ======================================================
 # ENDPOINTS
 # ======================================================
@@ -43,6 +48,24 @@ def set_day_schedule(professional_id: str, data: SetDayRequest):
             slot_minutes=data.slotMinutes
         )
         return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/{professional_id}/schedule-config")
+def set_schedule_config(professional_id: str, data: SetScheduleConfigRequest):
+    try:
+        from core.professionals_store import get_professional, update_professional
+        prof = get_professional(professional_id)
+        if not prof:
+            raise HTTPException(status_code=404, detail="Profesional no encontrado")
+        schedule = prof.get("schedule") or {}
+        schedule["slotMinutes"]        = data.slotMinutes
+        schedule["slotMinutesTelemed"] = data.slotMinutesTelemed
+        update_professional(professional_id, {"schedule": schedule})
+        return {"ok": True}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
