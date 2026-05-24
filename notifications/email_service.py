@@ -1,334 +1,268 @@
 """
-notifications/email_service.py
+agenda/service.py
+-----------------
+Reemplaza lecturas de /data/professionals.json y /data/pacientes → PostgreSQL
+Misma interfaz que el service original.
 """
+from __future__ import annotations
 
-import os
-import base64
-import resend
-from typing import List, Tuple, Optional
+from datetime import date as _date
+from typing import Dict, Any
 
-RESEND_API_KEY = os.getenv("RESEND_API_KEY")
-FROM_EMAIL     = "Instituto de Cirugía Articular <contacto@icarticular.cl>"
-BACKEND_URL    = os.getenv("BACKEND_URL", "https://services.icarticular.cl")
-PREDIAG_URL    = "https://app.icarticular.cl"
+from agenda import store
+from agenda.models import (
+    CreateSlotRequest,
+    ConfirmSlotRequest,
+    CancelSlotRequest,
+    RescheduleRequest,
+    MutationResult,
+    SlotStatus,
+)
+from agenda.utils import (
+    assert_future_slot,
+    normalize_rut,
+    parse_yyyy_mm_dd,
+    parse_hh_mm,
+    is_on_interval,
+    today_utc,
+)
 
-LOGO_URL = "https://lh3.googleusercontent.com/sitesv/APaQ0SSMBWniO2NWVDwGoaCaQjiel3lBKrmNgpaZZY-ZsYzTawYaf-_7Ad-xfeKVyfCqxa7WgzhWPKHtdaCS0jGtFRrcseP-R8KG1LfY2iYuhZeClvWEBljPLh9KANIClyKSsiSJH8_of4LPUOJUl7cWNwB2HKR7RVH_xB_h9BG-8Nr9jnorb-q2gId2=w300"
-
-
-def _init():
-    if not RESEND_API_KEY:
-        raise RuntimeError("Falta variable RESEND_API_KEY")
-    resend.api_key = RESEND_API_KEY
-
-
-def _bloque_prediagnostico(
-    nombre: str,
-    rut: str = "",
-    edad: int | None = None,
-    sexo: str = "",
-) -> str:
-    from urllib.parse import urlencode
-    params: dict = {"nombre": nombre, "rut": rut, "origen": "reserva"}
-    if edad: params["edad"]   = str(edad)
-    if sexo: params["genero"] = sexo
-    link = f"{PREDIAG_URL}?{urlencode(params)}"
-    return f"""
-    <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px;
-                padding: 18px 20px; margin: 24px 0;">
-        <p style="margin: 0 0 8px 0; font-weight: bold; color: #1e3a5f; font-size: 15px;">
-            🩺 ¿Quiere llegar preparado a su consulta?
-        </p>
-        <p style="margin: 0 0 12px 0; color: #334155; font-size: 13px; line-height: 1.5;">
-            Nuestro asistente de <strong>prediagnóstico con IA</strong> puede sugerirle
-            los exámenes que necesitará antes de su cita, validados por su médico.
-        </p>
-        <a href="{link}" style="display: inline-block; background: #1d4ed8; color: white;
-            padding: 11px 22px; border-radius: 8px; text-decoration: none;
-            font-weight: bold; font-size: 13px;">Iniciar prediagnóstico IA →</a>
-        <p style="margin: 10px 0 0 0; font-size: 11px; color: #94a3b8;">
-            Servicio opcional con valor. No reemplaza la consulta médica.
-        </p>
-    </div>
-    """
+DEFAULT_INTERVAL_MIN = 15
 
 
-# ======================================================
-# 1. CONFIRMACIÓN DE RESERVA
-# ======================================================
+def _load_admin(rut: str) -> dict | None:
+    from db.supabase_client import get_paciente
+    return get_paciente(rut)
 
-def enviar_confirmacion_reserva(
-    *,
-    email_paciente: str,
-    nombre_paciente: str,
-    rut_paciente: str = "",
-    fecha: str,
-    hora: str,
-    profesional_nombre: str,
-    edad_paciente: int | None = None,
-    sexo_paciente: str = "",
-) -> bool:
-    _init()
 
-    html = f"""
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; background: #fff;">
-        <img src="{LOGO_URL}" alt="Instituto de Cirugía Articular" style="height: 60px; margin-bottom: 24px;" />
-        <h2 style="color: #0f172a;">Reserva confirmada</h2>
-        <p>Estimado/a <strong>{nombre_paciente}</strong>,</p>
-        <p>Su hora ha sido reservada exitosamente en el Instituto de Cirugía Articular:</p>
-        <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 16px; margin: 20px 0;">
-            <p style="margin: 4px 0;"><strong>Fecha:</strong> {fecha}</p>
-            <p style="margin: 4px 0;"><strong>Hora:</strong> {hora}</p>
-            <p style="margin: 4px 0;"><strong>Profesional:</strong> {profesional_nombre}</p>
-        </div>
-        <p>Por favor llegue 10 minutos antes de su hora. Si necesita cancelar o reagendar,
-        contáctenos a <a href="mailto:contacto@icarticular.cl">contacto@icarticular.cl</a>.</p>
-        {_bloque_prediagnostico(nombre_paciente, rut_paciente, edad_paciente, sexo_paciente)}
-        <p style="color: #64748b; font-size: 12px; margin-top: 24px;">
-            Instituto de Cirugía Articular — Curicó, Chile<br/>contacto@icarticular.cl
-        </p>
-    </div>
-    """
+def _get_professional_name(professional_id: str) -> str:
+    from db.supabase_client import get_profesionales
+    profs = get_profesionales()
+    return profs.get(professional_id, {}).get("name", professional_id)
 
+
+def _calcular_edad(fecha_nacimiento: str) -> int | None:
+    if not fecha_nacimiento:
+        return None
     try:
-        resend.Emails.send({"from": FROM_EMAIL, "to": [email_paciente],
-            "subject": f"ICA — Reserva confirmada · {fecha} {hora}", "html": html})
-        return True
-    except Exception as e:
-        print(f"❌ ERROR EMAIL reserva: {e}"); return False
+        partes = str(fecha_nacimiento).strip().replace("/", "-").split("-")
+        if len(partes) == 3:
+            if len(partes[0]) == 4:
+                anio, mes, dia = int(partes[0]), int(partes[1]), int(partes[2])
+            else:
+                dia, mes, anio = int(partes[0]), int(partes[1]), int(partes[2])
+            hoy = _date.today()
+            edad = hoy.year - anio
+            if (hoy.month, hoy.day) < (mes, dia):
+                edad -= 1
+            return edad if edad > 0 else None
+    except Exception:
+        return None
 
 
-# ======================================================
-# 2. CONFIRMACIÓN DE CONTROL GRATUITO
-# ======================================================
-
-def enviar_confirmacion_gratuito(
-    *,
-    email_paciente: str,
-    nombre_paciente: str,
-    fecha: str,
-    hora: str,
-    profesional_nombre: str,
-    token: str
-) -> bool:
-    _init()
-
-    link = f"{BACKEND_URL}/api/control/confirmar?token={token}"
-
-    html = f"""
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; background: #fff;">
-        <img src="{LOGO_URL}" alt="Instituto de Cirugía Articular" style="height: 60px; margin-bottom: 24px;" />
-        <h2 style="color: #0f172a;">Confirmación de atención sin costo</h2>
-        <p>Estimado/a <strong>{nombre_paciente}</strong>,</p>
-        <p>Su próxima atención ha sido marcada como <strong>control gratuito</strong>.
-        Por favor confirme haciendo click en el botón:</p>
-        <a href="{link}" style="display: inline-block; background: #0f172a; color: white;
-            padding: 14px 28px; border-radius: 8px; text-decoration: none;
-            font-weight: bold; font-size: 15px; margin: 20px 0;">✓ Confirmar atención gratuita</a>
-        <div style="background: #f0fdf4; border: 1px solid #86efac; border-radius: 8px; padding: 16px; margin: 20px 0;">
-            <p style="margin: 4px 0;"><strong>Fecha:</strong> {fecha}</p>
-            <p style="margin: 4px 0;"><strong>Hora:</strong> {hora}</p>
-            <p style="margin: 4px 0;"><strong>Profesional:</strong> {profesional_nombre}</p>
-            <p style="margin: 4px 0; color: #16a34a; font-weight: bold;">Esta atención no tiene costo para usted.</p>
-        </div>
-        <p style="color: #64748b; font-size: 12px; margin-top: 24px;">
-            Si no solicitó esta atención, ignore este mensaje.<br/>
-            Instituto de Cirugía Articular — Curicó, Chile
-        </p>
-    </div>
-    """
-
+def _enviar_confirmacion_reserva(rut, date, time, professional) -> None:
     try:
-        resend.Emails.send({"from": FROM_EMAIL, "to": [email_paciente],
-            "subject": "Su próxima atención en ICA es sin costo", "html": html})
-        return True
+        from notifications.email_service import enviar_confirmacion_reserva
+        admin = _load_admin(rut)
+        if not admin:
+            return
+        email = admin.get("email", "").strip()
+        if not email:
+            return
+        nombre      = f"{admin.get('nombre', '')} {admin.get('apellido_paterno', '')}".strip()
+        nombre_prof = _get_professional_name(professional)
+        edad        = _calcular_edad(admin.get("fecha_nacimiento", ""))
+        sexo        = admin.get("sexo", "")
+
+        enviar_confirmacion_reserva(
+            email_paciente=email,
+            nombre_paciente=nombre,
+            rut_paciente=rut,
+            fecha=date,
+            hora=time,
+            profesional_nombre=nombre_prof,
+            edad_paciente=edad,
+            sexo_paciente=sexo,
+        )
     except Exception as e:
-        print(f"❌ ERROR EMAIL gratuito: {e}"); return False
+        print(f"⚠️ No se pudo enviar email de confirmación: {e}")
 
 
-# ======================================================
-# 3. CONFIRMACIÓN SOBRE CUPO
-# ======================================================
+# ══════════════════════════════════════════════════════════════
+# LECTURAS
+# ══════════════════════════════════════════════════════════════
 
-def enviar_confirmacion_sobrecupo(
-    *,
-    email_paciente: str,
-    nombre_paciente: str,
-    fecha: str,
-    hora: str,
-    profesional_nombre: str,
-    token: str,
-    gratuito: bool = False,
-    payment_url: Optional[str] = None,   # ← link de pago Flow si no es gratuito
-) -> bool:
-    _init()
-
-    link = f"{BACKEND_URL}/api/sobrecupo/confirmar?token={token}"
-
-    if gratuito:
-        badge_color  = "#16a34a"
-        badge_bg     = "#f0fdf4"
-        badge_border = "#86efac"
-        badge_texto  = "Esta atención no tiene costo para usted."
-        asunto       = f"ICA — Sobre cupo sin costo · {fecha} {hora}"
-        titulo       = "Confirmación de sobre cupo gratuito"
-        btn_texto    = "✓ Confirmar sobre cupo gratuito"
-        pago_html    = ""
-    else:
-        badge_color  = "#1d4ed8"
-        badge_bg     = "#eff6ff"
-        badge_border = "#bfdbfe"
-        badge_texto  = "Esta atención tiene el valor normal de consulta."
-        asunto       = f"ICA — Sobre cupo agendado · {fecha} {hora}"
-        titulo       = "Confirmación de sobre cupo"
-        btn_texto    = "✓ Confirmar sobre cupo"
-        pago_html    = f"""
-        <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px;
-                    padding: 16px; margin: 16px 0;">
-            <p style="margin: 0 0 10px 0; font-weight: bold; color: #92400e;">💳 Pago en línea</p>
-            <p style="margin: 0 0 12px 0; font-size: 13px; color: #78350f;">
-                Para confirmar su sobre cupo, complete el pago en línea:
-            </p>
-            <a href="{payment_url}" style="display: inline-block; background: #d97706;
-                color: white; padding: 12px 24px; border-radius: 8px;
-                text-decoration: none; font-weight: bold; font-size: 14px;">
-                Pagar ahora →
-            </a>
-        </div>
-        """ if payment_url else """
-        <p style="color: #64748b; font-size: 13px; margin: 12px 0;">
-            El valor de la consulta deberá ser cancelado en el centro.
-        </p>
-        """
-
-    html = f"""
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; background: #fff;">
-        <img src="{LOGO_URL}" alt="Instituto de Cirugía Articular" style="height: 60px; margin-bottom: 24px;" />
-        <h2 style="color: #0f172a;">{titulo}</h2>
-        <p>Estimado/a <strong>{nombre_paciente}</strong>,</p>
-        <p>Se ha agendado un <strong>sobre cupo</strong> para usted fuera del horario habitual.
-        Por favor confirme su asistencia:</p>
-        <a href="{link}" style="display: inline-block; background: #0f172a; color: white;
-            padding: 14px 28px; border-radius: 8px; text-decoration: none;
-            font-weight: bold; font-size: 15px; margin: 20px 0;">{btn_texto}</a>
-        <div style="background: {badge_bg}; border: 1px solid {badge_border};
-                    border-radius: 8px; padding: 16px; margin: 20px 0;">
-            <p style="margin: 4px 0;"><strong>Fecha:</strong> {fecha}</p>
-            <p style="margin: 4px 0;"><strong>Hora:</strong> {hora}</p>
-            <p style="margin: 4px 0;"><strong>Profesional:</strong> {profesional_nombre}</p>
-            <p style="margin: 4px 0; color: {badge_color}; font-weight: bold;">{badge_texto}</p>
-            <p style="margin: 8px 0 0; font-size: 12px; color: #64748b;">
-                ⏳ Esta hora está pendiente de aprobación final por el médico.
-            </p>
-        </div>
-        {pago_html}
-        <p>Por favor llegue 10 minutos antes de su hora.</p>
-        <p style="color: #64748b; font-size: 12px; margin-top: 24px;">
-            Si no solicitó esta atención, ignore este mensaje.<br/>
-            Instituto de Cirugía Articular — Curicó, Chile
-        </p>
-    </div>
-    """
-
-    try:
-        resend.Emails.send({"from": FROM_EMAIL, "to": [email_paciente],
-            "subject": asunto, "html": html})
-        return True
-    except Exception as e:
-        print(f"❌ ERROR EMAIL sobrecupo: {e}"); return False
+def get_day(date: str) -> Dict[str, Any]:
+    parse_yyyy_mm_dd(date)
+    return store.read_day(date)
 
 
-# ======================================================
-# 4. DOCUMENTOS DE ATENCIÓN
-# ======================================================
+def get_occupancy(date: str, time: str) -> Dict[str, SlotStatus]:
+    parse_yyyy_mm_dd(date)
+    parse_hh_mm(time)
+    return store.read_occupancy(date, time)
 
-def enviar_documentos_atencion(
-    *,
-    email_paciente: str,
-    nombre_paciente: str,
-    fecha: str,
-    profesional_nombre: str,
-    adjuntos: List[Tuple[str, bytes]]
-) -> bool:
-    _init()
 
-    nombres   = [a[0].replace(".pdf", "").replace("_", " ").title() for a in adjuntos]
-    lista_docs = "".join(f"<li>{n}</li>" for n in nombres)
+# ══════════════════════════════════════════════════════════════
+# REGLAS
+# ══════════════════════════════════════════════════════════════
 
-    html = f"""
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; background: #fff;">
-        <img src="{LOGO_URL}" alt="Instituto de Cirugía Articular" style="height: 60px; margin-bottom: 24px;" />
-        <h2 style="color: #0f172a;">Documentos de su atención médica</h2>
-        <p>Estimado/a <strong>{nombre_paciente}</strong>,</p>
-        <p>Adjunto encontrará los documentos generados en su atención del <strong>{fecha}</strong>
-        con <strong>{profesional_nombre}</strong>:</p>
-        <ul style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;
-                   padding: 16px 24px; margin: 16px 0; color: #0f172a;">{lista_docs}</ul>
-        <p>Guarde estos documentos como respaldo de su atención médica.</p>
-        <p style="color: #64748b; font-size: 12px; margin-top: 24px;">
-            Instituto de Cirugía Articular — Curicó, Chile<br/>contacto@icarticular.cl
-        </p>
-    </div>
-    """
+def _assert_interval(time: str, interval: int = DEFAULT_INTERVAL_MIN) -> None:
+    if not is_on_interval(time, interval):
+        raise ValueError(f"La hora debe caer en intervalos de {interval} minutos.")
 
-    attachments = [
-        {"filename": nombre, "content": base64.b64encode(contenido).decode("utf-8")}
-        for nombre, contenido in adjuntos
-    ]
 
-    try:
-        resend.Emails.send({"from": FROM_EMAIL, "to": [email_paciente],
-            "subject": f"ICA — Documentos de su atención · {fecha}",
-            "html": html, "attachments": attachments})
-        return True
-    except Exception as e:
-        print(f"❌ ERROR EMAIL documentos: {e}"); return False
-    
-# ======================================================
-# AGREGAR AL FINAL DE notifications/email_service.py
-# ======================================================
+def _assert_free(date: str, time: str, professional: str) -> None:
+    occ = get_occupancy(date, time)
+    if occ.get(professional) not in (None, "available"):
+        raise ValueError("El slot ya está ocupado.")
 
-def enviar_notificacion_bloqueo(
-    *,
-    email_paciente: str,
-    nombre_paciente: str,
-    fecha: str,
-    hora: str,
-    profesional_nombre: str,
-    motivo: str = "El profesional no estará disponible este día",
-) -> bool:
-    _init()
 
-    html = f"""
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; background: #fff;">
-        <img src="{LOGO_URL}" alt="Instituto de Cirugía Articular" style="height: 60px; margin-bottom: 24px;" />
-        <h2 style="color: #0f172a;">Aviso importante sobre su hora médica</h2>
-        <p>Estimado/a <strong>{nombre_paciente}</strong>,</p>
-        <p>Le informamos que su hora médica ha sido <strong>cancelada</strong> por el siguiente motivo:</p>
-        <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 16px; margin: 20px 0;">
-            <p style="margin: 4px 0;"><strong>Fecha:</strong> {fecha}</p>
-            <p style="margin: 4px 0;"><strong>Hora:</strong> {hora}</p>
-            <p style="margin: 4px 0;"><strong>Profesional:</strong> {profesional_nombre}</p>
-            <p style="margin: 12px 0 0; color: #dc2626; font-weight: bold;">⚠️ {motivo}</p>
-        </div>
-        <p>Le pedimos disculpas por los inconvenientes. Para reagendar su hora, contáctenos a:</p>
-        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin: 16px 0;">
-            <p style="margin: 4px 0;">📧 <a href="mailto:contacto@icarticular.cl">contacto@icarticular.cl</a></p>
-            <p style="margin: 4px 0;">🌐 <a href="https://reservas.icarticular.cl">reservas.icarticular.cl</a></p>
-        </div>
-        <p style="color: #64748b; font-size: 12px; margin-top: 24px;">
-            Instituto de Cirugía Articular — Curicó, Chile<br/>contacto@icarticular.cl
-        </p>
-    </div>
-    """
+def _assert_not_past_date(slot_date: str) -> None:
+    if parse_yyyy_mm_dd(slot_date) < today_utc():
+        raise ValueError("No se puede cancelar un slot de una fecha pasada.")
 
-    try:
-        resend.Emails.send({
-            "from": FROM_EMAIL,
-            "to":   [email_paciente],
-            "subject": f"ICA — Cancelación de hora · {fecha} {hora}",
-            "html": html
-        })
-        return True
-    except Exception as e:
-        print(f"❌ ERROR EMAIL bloqueo: {e}"); return False
+
+# ══════════════════════════════════════════════════════════════
+# MUTACIONES
+# ══════════════════════════════════════════════════════════════
+
+def create_slot(req: CreateSlotRequest) -> MutationResult:
+    parse_yyyy_mm_dd(req.date)
+    parse_hh_mm(req.time)
+    _assert_interval(req.time)
+    assert_future_slot(req.date, req.time)
+
+    professional = req.professional
+    rut = normalize_rut(req.rut)
+
+    _assert_free(req.date, req.time, professional)
+
+    store.set_slot(
+        date=req.date,
+        time=req.time,
+        professional=professional,
+        status=req.status,
+        rut=rut,
+        tipo=req.tipo,
+    )
+
+    _enviar_confirmacion_reserva(rut, req.date, req.time, professional)
+
+    return MutationResult(
+        ok=True,
+        message="Slot creado",
+        date=req.date,
+        professional=professional,
+        slot={"time": req.time, "status": req.status, "rut": rut, "tipo": req.tipo},
+    )
+
+
+def confirm_slot(req: ConfirmSlotRequest) -> MutationResult:
+    parse_yyyy_mm_dd(req.date)
+    parse_hh_mm(req.time)
+
+    professional = req.professional
+    day  = store.read_day(req.date)
+    prof = day.get(professional, {})
+    slot = prof.get("slots", {}).get(req.time)
+
+    if not slot:
+        raise ValueError("El slot no existe.")
+    if slot.get("status") != "reserved":
+        raise ValueError("Solo se pueden confirmar slots reservados.")
+
+    rut  = slot.get("rut")
+    tipo = slot.get("tipo", "presencial")
+
+    store.set_slot(
+        date=req.date,
+        time=req.time,
+        professional=professional,
+        status="confirmed",
+        rut=rut,
+        tipo=tipo,
+    )
+
+    return MutationResult(
+        ok=True,
+        message="Slot confirmado",
+        date=req.date,
+        professional=professional,
+        slot={"time": req.time, "status": "confirmed", "rut": rut, "tipo": tipo},
+    )
+
+
+def cancel_slot(req: CancelSlotRequest) -> MutationResult:
+    parse_yyyy_mm_dd(req.date)
+    parse_hh_mm(req.time)
+    _assert_not_past_date(req.date)
+
+    store.clear_slot(
+        date=req.date,
+        time=req.time,
+        professional=req.professional,
+    )
+
+    return MutationResult(
+        ok=True,
+        message="Slot anulado",
+        date=req.date,
+        professional=req.professional,
+        slot={"time": req.time, "status": "available"},
+    )
+
+
+def reschedule(req: RescheduleRequest) -> MutationResult:
+    f = req.from_slot
+    t = req.to_slot
+
+    parse_yyyy_mm_dd(f.date)
+    parse_hh_mm(f.time)
+    parse_yyyy_mm_dd(t.date)
+    parse_hh_mm(t.time)
+
+    _assert_interval(f.time)
+    _assert_interval(t.time)
+    assert_future_slot(f.date, f.time)
+    assert_future_slot(t.date, t.time)
+
+    professional = f.professional
+    _assert_free(t.date, t.time, professional)
+
+    day  = store.read_day(f.date)
+    prof = day.get(professional, {})
+    slot = prof.get("slots", {}).get(f.time)
+
+    if not slot or slot.get("status") not in ("reserved", "confirmed"):
+        raise ValueError("No existe un slot válido para reprogramar.")
+
+    rut  = slot.get("rut")
+    tipo = slot.get("tipo", "presencial")
+
+    store.set_slot(
+        date=t.date, time=t.time,
+        professional=professional,
+        status=slot["status"], rut=rut,
+        tipo=tipo,
+    )
+    store.clear_slot(
+        date=f.date, time=f.time,
+        professional=professional,
+    )
+
+    return MutationResult(
+        ok=True,
+        message="Slot reprogramado",
+        date=t.date,
+        professional=professional,
+        slot={"time": t.time, "status": slot["status"], "rut": rut, "tipo": tipo},
+        moved_from={"date": f.date, "time": f.time},
+        moved_to={"date": t.date, "time": t.time},
+    )
+
+
+def daily_cleanup() -> None:
+    keep_from = today_utc().isoformat()
+    store.cleanup_past(keep_from_date=keep_from)
     
