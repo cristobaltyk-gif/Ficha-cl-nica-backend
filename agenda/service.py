@@ -63,7 +63,6 @@ def _calcular_edad(fecha_nacimiento: str) -> int | None:
 def _enviar_confirmacion_reserva(rut, date, time, professional) -> None:
     try:
         from notifications.email_service import enviar_confirmacion_reserva
-        from db.supabase_client import get_users
         admin = _load_admin(rut)
         if not admin:
             return
@@ -75,10 +74,6 @@ def _enviar_confirmacion_reserva(rut, date, time, professional) -> None:
         edad        = _calcular_edad(admin.get("fecha_nacimiento", ""))
         sexo        = admin.get("sexo", "")
 
-        users = get_users()
-        u = users.get(professional, {})
-        rol_prof = (u.get("role") or {}).get("name", "")
-
         enviar_confirmacion_reserva(
             email_paciente=email,
             nombre_paciente=nombre,
@@ -86,7 +81,6 @@ def _enviar_confirmacion_reserva(rut, date, time, professional) -> None:
             fecha=date,
             hora=time,
             profesional_nombre=nombre_prof,
-            rol_profesional=rol_prof,
             edad_paciente=edad,
             sexo_paciente=sexo,
         )
@@ -271,3 +265,4 @@ def reschedule(req: RescheduleRequest) -> MutationResult:
 def daily_cleanup() -> None:
     keep_from = today_utc().isoformat()
     store.cleanup_past(keep_from_date=keep_from)
+        
