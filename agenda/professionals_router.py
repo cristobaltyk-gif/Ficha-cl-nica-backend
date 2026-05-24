@@ -14,18 +14,19 @@ router = APIRouter(
 # ======================================================
 
 class Block(BaseModel):
-    start: str  # HH:MM
-    end: str    # HH:MM
+    start: str
+    end: str
+    tipo: str = "presencial"
 
 
 class SetDayRequest(BaseModel):
-    weekday: str        # monday, tuesday...
+    weekday: str
     blocks: List[Block]
     slotMinutes: int = 15
 
 
 class BlockDateRequest(BaseModel):
-    date: str  # YYYY-MM-DD
+    date: str
 
 
 # ======================================================
