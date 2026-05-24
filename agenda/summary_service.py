@@ -4,7 +4,7 @@ agenda/summary_service.py
 from __future__ import annotations
 
 from datetime import date, timedelta, datetime, timezone
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from agenda import store
 
@@ -40,10 +40,7 @@ def _count_slots_in_blocks(blocks: List[Dict[str, str]], slot_minutes: int) -> i
 
 
 def _now_chile_str() -> str:
-    """Hora actual en Chile (UTC-4 horario de verano, UTC-3 invierno)."""
-    from datetime import timedelta
-    now_utc = datetime.now(timezone.utc)
-    # Chile Standard Time = UTC-4 (aplica la mayor parte del año)
+    now_utc   = datetime.now(timezone.utc)
     now_chile = now_utc - timedelta(hours=4)
     return now_chile.strftime("%H:%M")
 
@@ -53,7 +50,6 @@ def _count_future_slots_in_blocks(
     slot_minutes: int,
     from_time: str
 ) -> int:
-    """Cuenta solo slots >= from_time."""
     total = 0
     for b in blocks:
         minutes     = int(b["start"].split(":")[0]) * 60 + int(b["start"].split(":")[1])
@@ -71,13 +67,13 @@ def _count_free_slots(
     day_data: Dict[str, Any],
     professional: str,
     current_date: date,
-    professionals: Dict[str, Any]
+    professionals: Dict[str, Any],
+    tipo: Optional[str] = None,
 ) -> int:
     prof_cfg = professionals.get(professional)
     if not prof_cfg or not prof_cfg.get("active"):
         return -1
 
-    # Fecha bloqueada
     blocked_dates = prof_cfg.get("blocked_dates") or []
     if current_date.isoformat() in blocked_dates:
         return -1
@@ -93,7 +89,13 @@ def _count_free_slots(
 
     slot_minutes = schedule.get("slotMinutes", 15)
 
-    # Si es hoy, contar solo slots futuros
+    # Filtrar bloques por tipo si se especifica
+    if tipo:
+        day_blocks = [b for b in day_blocks if b.get("tipo", "presencial") == tipo]
+        if not day_blocks:
+            return -1
+
+    # Si es hoy contar solo slots futuros
     if current_date == date.today():
         now_str     = _now_chile_str()
         total_slots = _count_future_slots_in_blocks(day_blocks, slot_minutes, now_str)
@@ -102,21 +104,26 @@ def _count_free_slots(
 
     prof_day = day_data.get(professional, {})
 
-    # Solo contar como ocupados los slots reservados/confirmados
     busy = len([
         t for t, s in prof_day.get("slots", {}).items()
         if s.get("status") in ("reserved", "confirmed")
+        and (tipo is None or s.get("tipo", "presencial") == tipo)
     ])
 
     return max(total_slots - busy, 0)
 
 
-def range_summary(*, professional: str, start_date: str, days: int) -> Dict[str, Any]:
+def range_summary(
+    *,
+    professional: str,
+    start_date: str,
+    days: int,
+    tipo: Optional[str] = None,
+) -> Dict[str, Any]:
     professionals = _load_professionals()
     start         = date.fromisoformat(start_date)
     end           = start + timedelta(days=days - 1)
 
-    # UNA sola query para todo el rango
     all_data = store.read_range(start.isoformat(), end.isoformat())
 
     result_days: Dict[str, str] = {}
@@ -124,7 +131,7 @@ def range_summary(*, professional: str, start_date: str, days: int) -> Dict[str,
         current    = start + timedelta(days=i)
         iso        = current.isoformat()
         day_data   = all_data.get(iso, {})
-        free_slots = _count_free_slots(day_data, professional, current, professionals)
+        free_slots = _count_free_slots(day_data, professional, current, professionals, tipo)
         result_days[iso] = "empty" if free_slots == -1 else _day_status(free_slots)
 
     return {"start_date": start_date, "professional": professional, "days": result_days}
@@ -143,4 +150,3 @@ def month_summary(*, professional: str, month: str) -> Dict[str, Any]:
 
 def week_summary(*, professional: str, week_start: str) -> Dict[str, Any]:
     return range_summary(professional=professional, start_date=week_start, days=7)
-    
