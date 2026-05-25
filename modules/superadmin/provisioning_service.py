@@ -50,7 +50,7 @@ def _provisionar(username: str, base_domain: str) -> dict:
         results["cloudflare"] = {"ok": False, "error": str(e)}
         print(f"[PROVISIONING] ❌ Cloudflare error: {e}")
 
-    # ── 3. RENDER — solo agrega la nueva URL, no toca nada más ──
+    # ── 3. RENDER — suspender auto-deploy, actualizar CORS, deploy manual ──
     try:
         results["render"] = _actualizar_cors_render(username, base_domain)
     except Exception as e:
@@ -97,10 +97,8 @@ def _agregar_dominio_vercel(username: str, base_domain: str) -> dict:
     details = res2.json()
     print(f"[PROVISIONING] Vercel domain details: {details}")
 
-    # Extraer CNAME target dinámico
     cname_target = details.get("cname") or "cname.vercel-dns.com"
 
-    # Extraer TXT de verificación
     txt_name  = None
     txt_value = None
     for v in (details.get("verification") or []):
@@ -181,66 +179,118 @@ def _crear_registros_cloudflare(
     return {"ok": True}
 
 
+def _render_headers() -> dict:
+    return {
+        "Authorization": f"Bearer {RENDER_API_KEY}",
+        "Content-Type":  "application/json",
+    }
+
+
+def _suspender_auto_deploy() -> None:
+    res = httpx.patch(
+        f"https://api.render.com/v1/services/{RENDER_SERVICE_ID}",
+        headers=_render_headers(),
+        json={"autoDeploy": "no"},
+        timeout=10,
+    )
+    if not res.is_success:
+        raise ValueError(f"Render suspender auto-deploy error: {res.text}")
+    print("[PROVISIONING] ⏸ Auto-deploy suspendido")
+
+
+def _reactivar_auto_deploy() -> None:
+    res = httpx.patch(
+        f"https://api.render.com/v1/services/{RENDER_SERVICE_ID}",
+        headers=_render_headers(),
+        json={"autoDeploy": "yes"},
+        timeout=10,
+    )
+    if not res.is_success:
+        print(f"[PROVISIONING] ⚠️ No se pudo reactivar auto-deploy: {res.text}")
+    else:
+        print("[PROVISIONING] ▶ Auto-deploy reactivado")
+
+
+def _gatillar_deploy() -> None:
+    res = httpx.post(
+        f"https://api.render.com/v1/services/{RENDER_SERVICE_ID}/deploys",
+        headers=_render_headers(),
+        json={},
+        timeout=10,
+    )
+    if not res.is_success:
+        raise ValueError(f"Render deploy error: {res.text}")
+    deploy_id = res.json().get("id", "?")
+    print(f"[PROVISIONING] 🚀 Deploy gatillado — id: {deploy_id}")
+
+
 def _actualizar_cors_render(username: str, base_domain: str) -> dict:
     if not RENDER_API_KEY or not RENDER_SERVICE_ID:
         raise ValueError("Faltan RENDER_API_KEY o RENDER_SERVICE_ID")
 
     nuevo_origen = f"https://{username}.{base_domain}"
 
-    # ── Leer TODAS las variables actuales ──
-    res = httpx.get(
-        f"https://api.render.com/v1/services/{RENDER_SERVICE_ID}/env-vars",
-        headers={"Authorization": f"Bearer {RENDER_API_KEY}"},
-        timeout=10,
-    )
-    if not res.is_success:
-        raise ValueError(f"Render GET error: {res.text}")
+    # ── 1. Suspender auto-deploy ──
+    _suspender_auto_deploy()
 
-    env_vars = res.json()
+    try:
+        # ── 2. Leer TODAS las variables actuales ──
+        res = httpx.get(
+            f"https://api.render.com/v1/services/{RENDER_SERVICE_ID}/env-vars",
+            headers=_render_headers(),
+            timeout=10,
+        )
+        if not res.is_success:
+            raise ValueError(f"Render GET error: {res.text}")
 
-    # Buscar FRONTEND_URLS y actualizar solo esa
-    frontend_urls_actual = ""
-    for var in env_vars:
-        if var.get("envVar", {}).get("key") == "FRONTEND_URLS":
-            frontend_urls_actual = var.get("envVar", {}).get("value", "")
-            break
+        env_vars = res.json()
 
-    urls = [u.strip() for u in frontend_urls_actual.split(",") if u.strip()]
-    if nuevo_origen in urls:
-        print(f"[PROVISIONING] CORS {nuevo_origen} ya existe — ok")
-        return {"ok": True, "note": "ya existía"}
+        # ── 3. Buscar FRONTEND_URLS y verificar si ya existe ──
+        frontend_urls_actual = ""
+        for var in env_vars:
+            if var.get("envVar", {}).get("key") == "FRONTEND_URLS":
+                frontend_urls_actual = var.get("envVar", {}).get("value", "")
+                break
 
-    urls.append(nuevo_origen)
-    nuevo_valor = ",".join(urls)
+        urls = [u.strip() for u in frontend_urls_actual.split(",") if u.strip()]
+        if nuevo_origen in urls:
+            print(f"[PROVISIONING] CORS {nuevo_origen} ya existe — ok")
+            return {"ok": True, "note": "ya existía"}
 
-    # ── Construir lista completa con TODAS las vars + FRONTEND_URLS actualizado ──
-    todas_las_vars = []
-    frontend_incluido = False
-    for var in env_vars:
-        key = var.get("envVar", {}).get("key")
-        val = var.get("envVar", {}).get("value", "")
-        if key == "FRONTEND_URLS":
-            todas_las_vars.append({"key": key, "value": nuevo_valor})
-            frontend_incluido = True
-        elif key:
-            todas_las_vars.append({"key": key, "value": val})
+        urls.append(nuevo_origen)
+        nuevo_valor = ",".join(urls)
 
-    if not frontend_incluido:
-        todas_las_vars.append({"key": "FRONTEND_URLS", "value": nuevo_valor})
+        # ── 4. PUT con TODAS las variables + FRONTEND_URLS actualizado ──
+        todas_las_vars = []
+        frontend_incluido = False
+        for var in env_vars:
+            key = var.get("envVar", {}).get("key")
+            val = var.get("envVar", {}).get("value", "")
+            if key == "FRONTEND_URLS":
+                todas_las_vars.append({"key": key, "value": nuevo_valor})
+                frontend_incluido = True
+            elif key:
+                todas_las_vars.append({"key": key, "value": val})
 
-    # ── PUT con TODAS las variables — no se pierde ninguna ──
-    res2 = httpx.put(
-        f"https://api.render.com/v1/services/{RENDER_SERVICE_ID}/env-vars",
-        headers={
-            "Authorization": f"Bearer {RENDER_API_KEY}",
-            "Content-Type":  "application/json",
-        },
-        json=todas_las_vars,
-        timeout=10,
-    )
+        if not frontend_incluido:
+            todas_las_vars.append({"key": "FRONTEND_URLS", "value": nuevo_valor})
 
-    if not res2.is_success:
-        raise ValueError(f"Render PUT error: {res2.text}")
+        res2 = httpx.put(
+            f"https://api.render.com/v1/services/{RENDER_SERVICE_ID}/env-vars",
+            headers=_render_headers(),
+            json=todas_las_vars,
+            timeout=10,
+        )
+        if not res2.is_success:
+            raise ValueError(f"Render PUT error: {res2.text}")
 
-    print(f"[PROVISIONING] ✅ CORS actualizado: {nuevo_origen}")
-    return {"ok": True, "frontend_urls": nuevo_valor}
+        print(f"[PROVISIONING] ✅ CORS actualizado: {nuevo_origen}")
+
+        # ── 5. Deploy manual con variables ya completas ──
+        _gatillar_deploy()
+
+        return {"ok": True, "frontend_urls": nuevo_valor}
+
+    finally:
+        # ── 6. Siempre reactivar auto-deploy al final ──
+        _reactivar_auto_deploy()
