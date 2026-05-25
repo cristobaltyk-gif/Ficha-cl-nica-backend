@@ -74,7 +74,6 @@ def _eliminar_registros_cloudflare(username: str, base_domain: str) -> dict:
         print(f"[DEPROVISIONING] ✅ CNAME eliminado: {subdominio}")
 
     # ── Eliminar TXT de verificación ──
-    # Vercel crea TXT con nombre _vercel.subdominio o _vercel.base_domain
     for txt_name in [f"_vercel.{subdominio}", f"_vercel.{base_domain}"]:
         res_txt = httpx.get(
             f"https://api.cloudflare.com/client/v4/zones/{CLOUDFLARE_ZONE_ID}/dns_records",
@@ -83,7 +82,6 @@ def _eliminar_registros_cloudflare(username: str, base_domain: str) -> dict:
             timeout=10,
         )
         for record in res_txt.json().get("result", []):
-            # Solo eliminar si el valor contiene el username para no borrar TXT de otros
             if username in record.get("content", ""):
                 httpx.delete(
                     f"https://api.cloudflare.com/client/v4/zones/{CLOUDFLARE_ZONE_ID}/dns_records/{record['id']}",
@@ -117,60 +115,115 @@ def _eliminar_dominio_vercel(username: str, base_domain: str) -> dict:
     raise ValueError(f"Vercel delete error: {res.text}")
 
 
+def _render_headers() -> dict:
+    return {
+        "Authorization": f"Bearer {RENDER_API_KEY}",
+        "Content-Type":  "application/json",
+    }
+
+
+def _suspender_auto_deploy() -> None:
+    res = httpx.patch(
+        f"https://api.render.com/v1/services/{RENDER_SERVICE_ID}",
+        headers=_render_headers(),
+        json={"autoDeploy": "no"},
+        timeout=10,
+    )
+    if not res.is_success:
+        raise ValueError(f"Render suspender auto-deploy error: {res.text}")
+    print("[DEPROVISIONING] ⏸ Auto-deploy suspendido")
+
+
+def _reactivar_auto_deploy() -> None:
+    res = httpx.patch(
+        f"https://api.render.com/v1/services/{RENDER_SERVICE_ID}",
+        headers=_render_headers(),
+        json={"autoDeploy": "yes"},
+        timeout=10,
+    )
+    if not res.is_success:
+        print(f"[DEPROVISIONING] ⚠️ No se pudo reactivar auto-deploy: {res.text}")
+    else:
+        print("[DEPROVISIONING] ▶ Auto-deploy reactivado")
+
+
+def _gatillar_deploy() -> None:
+    res = httpx.post(
+        f"https://api.render.com/v1/services/{RENDER_SERVICE_ID}/deploys",
+        headers=_render_headers(),
+        json={},
+        timeout=10,
+    )
+    if not res.is_success:
+        raise ValueError(f"Render deploy error: {res.text}")
+    deploy_id = res.json().get("id", "?")
+    print(f"[DEPROVISIONING] 🚀 Deploy gatillado — id: {deploy_id}")
+
+
 def _eliminar_cors_render(username: str, base_domain: str) -> dict:
     if not RENDER_API_KEY or not RENDER_SERVICE_ID:
         raise ValueError("Faltan RENDER_API_KEY o RENDER_SERVICE_ID")
 
     origen = f"https://{username}.{base_domain}"
 
-    # ── Leer TODAS las variables actuales ──
-    res = httpx.get(
-        f"https://api.render.com/v1/services/{RENDER_SERVICE_ID}/env-vars",
-        headers={"Authorization": f"Bearer {RENDER_API_KEY}"},
-        timeout=10,
-    )
-    if not res.is_success:
-        raise ValueError(f"Render GET error: {res.text}")
+    # ── 1. Suspender auto-deploy ──
+    _suspender_auto_deploy()
 
-    env_vars = res.json()
+    try:
+        # ── 2. Leer TODAS las variables actuales ──
+        res = httpx.get(
+            f"https://api.render.com/v1/services/{RENDER_SERVICE_ID}/env-vars",
+            headers=_render_headers(),
+            timeout=10,
+        )
+        if not res.is_success:
+            raise ValueError(f"Render GET error: {res.text}")
 
-    frontend_urls_actual = ""
-    for var in env_vars:
-        if var.get("envVar", {}).get("key") == "FRONTEND_URLS":
-            frontend_urls_actual = var.get("envVar", {}).get("value", "")
-            break
+        env_vars = res.json()
 
-    urls = [u.strip() for u in frontend_urls_actual.split(",") if u.strip()]
+        # ── 3. Buscar FRONTEND_URLS y verificar si existe ──
+        frontend_urls_actual = ""
+        for var in env_vars:
+            if var.get("envVar", {}).get("key") == "FRONTEND_URLS":
+                frontend_urls_actual = var.get("envVar", {}).get("value", "")
+                break
 
-    if origen not in urls:
-        print(f"[DEPROVISIONING] CORS {origen} no existía — ok")
-        return {"ok": True, "note": "no existía"}
+        urls = [u.strip() for u in frontend_urls_actual.split(",") if u.strip()]
 
-    urls.remove(origen)
-    nuevo_valor = ",".join(urls)
+        if origen not in urls:
+            print(f"[DEPROVISIONING] CORS {origen} no existía — ok")
+            return {"ok": True, "note": "no existía"}
 
-    # ── PUT con TODAS las variables — solo cambia FRONTEND_URLS ──
-    todas_las_vars = []
-    for var in env_vars:
-        key = var.get("envVar", {}).get("key")
-        val = var.get("envVar", {}).get("value", "")
-        if key == "FRONTEND_URLS":
-            todas_las_vars.append({"key": key, "value": nuevo_valor})
-        elif key:
-            todas_las_vars.append({"key": key, "value": val})
+        urls.remove(origen)
+        nuevo_valor = ",".join(urls)
 
-    res2 = httpx.put(
-        f"https://api.render.com/v1/services/{RENDER_SERVICE_ID}/env-vars",
-        headers={
-            "Authorization": f"Bearer {RENDER_API_KEY}",
-            "Content-Type":  "application/json",
-        },
-        json=todas_las_vars,
-        timeout=10,
-    )
+        # ── 4. PUT con TODAS las variables — solo cambia FRONTEND_URLS ──
+        todas_las_vars = []
+        for var in env_vars:
+            key = var.get("envVar", {}).get("key")
+            val = var.get("envVar", {}).get("value", "")
+            if key == "FRONTEND_URLS":
+                todas_las_vars.append({"key": key, "value": nuevo_valor})
+            elif key:
+                todas_las_vars.append({"key": key, "value": val})
 
-    if not res2.is_success:
-        raise ValueError(f"Render PUT error: {res2.text}")
+        res2 = httpx.put(
+            f"https://api.render.com/v1/services/{RENDER_SERVICE_ID}/env-vars",
+            headers=_render_headers(),
+            json=todas_las_vars,
+            timeout=10,
+        )
+        if not res2.is_success:
+            raise ValueError(f"Render PUT error: {res2.text}")
 
-    print(f"[DEPROVISIONING] ✅ CORS eliminado: {origen}")
-    return {"ok": True, "frontend_urls": nuevo_valor}
+        print(f"[DEPROVISIONING] ✅ CORS eliminado: {origen}")
+
+        # ── 5. Deploy manual con variables ya completas ──
+        _gatillar_deploy()
+
+        return {"ok": True, "frontend_urls": nuevo_valor}
+
+    finally:
+        # ── 6. Siempre reactivar auto-deploy al final ──
+        _reactivar_auto_deploy()
+    
