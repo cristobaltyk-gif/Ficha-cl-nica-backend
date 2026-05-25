@@ -47,25 +47,68 @@ def _save_json(path: Path, data: dict) -> None:
 
 
 def _set_slot_fields(date: str, professional: str, time: str, updates: dict) -> None:
-    store = _load_json(AGENDA_PATH)
-    slot  = (
-        store["calendar"]
-             .setdefault(date, {})
-             .setdefault(professional, {"schedule": {}, "slots": {}})
-             ["slots"]
-             .setdefault(time, {})
+    from agenda import store as agenda_store
+    day  = agenda_store.read_day(date)
+    prof = day.get(professional, {})
+    slot = prof.get("slots", {}).get(time, {})
+
+    status = updates.get("status", slot.get("status", "reserved"))
+    rut    = slot.get("rut")
+    tipo   = slot.get("tipo", "presencial")
+    extra  = {k: v for k, v in slot.items() if k not in ("status", "rut", "tipo")}
+    extra.update({k: v for k, v in updates.items() if k not in ("status", "rut", "tipo")})
+
+    agenda_store.set_slot(
+        date=date, time=time, professional=professional,
+        status=status, rut=rut, tipo=tipo, extra=extra,
     )
-    slot.update(updates)
-    _save_json(AGENDA_PATH, store)
 
 
 def _get_nombre_paciente(rut: str) -> str:
-    admin_path = Path("/data/pacientes") / rut / "admin.json"
-    if admin_path.exists():
-        with open(admin_path) as f:
-            adm = json.load(f)
-        return f"{adm.get('nombre', '')} {adm.get('apellido_paterno', '')}".strip()
+    try:
+        from db.supabase_client import get_paciente
+        admin = get_paciente(rut)
+        if admin:
+            return f"{admin.get('nombre', '')} {admin.get('apellido_paterno', '')}".strip()
+    except Exception:
+        pass
     return rut
+
+
+def _registrar_caja_json(ref: dict) -> None:
+    mes       = ref["date"][:7]
+    caja_path = CAJA_DIR / f"{mes}.json"
+    caja      = _load_json(caja_path)
+    caja.setdefault(ref["date"], {}).setdefault(ref["professional"], {})[ref["time"]] = {
+        "arrival_status": "paid",
+        "pagado":         True,
+        "tipo_atencion":  ref.get("tipo_atencion", "particular"),
+        "monto":          ref["monto"],
+        "es_gratuito":    False,
+    }
+    _save_json(caja_path, caja)
+
+
+def _registrar_pagos_json(ref: dict, numero_orden: str) -> None:
+    mes        = ref["date"][:7]
+    pagos_path = PAGOS_DIR / f"{mes}.json"
+    pagos      = _load_json(pagos_path)
+    pagos.setdefault(ref["date"], {}).setdefault(ref["professional"], {})[ref["time"]] = {
+        "rut":              ref.get("rut", ""),
+        "tipo_atencion":    ref.get("tipo_atencion", "particular"),
+        "monto":            ref["monto"],
+        "es_gratuito":      False,
+        "metodo_pago":      "flow",
+        "numero_operacion": numero_orden,
+        "banco_origen":     None,
+        "pagado_at":        datetime.now().isoformat(timespec="seconds"),
+        "pagado_por":       "flow_online",
+        "anulado":          False,
+        "anulacion_motivo": None,
+        "anulacion_at":     None,
+        "anulado_por":      None,
+    }
+    _save_json(pagos_path, pagos)
 
 
 def _html(titulo: str, contenido: str, color: str, icono: str) -> str:
@@ -223,61 +266,48 @@ async def flow_webhook(request: Request):
         if not ref:
             return {"ok": False, "error": "token no encontrado"}
 
+        tipo_atencion = ref.get("tipo_atencion", "particular")
+        numero_orden  = str(estado.get("flowOrder", ""))
+
         with LOCK:
+            # Marcar slot como pagado en PostgreSQL
             _set_slot_fields(ref["date"], ref["professional"], ref["time"], {
                 "pagado":      True,
                 "pagado_flow": True,
             })
 
-            mes = ref["date"][:7]
+            # Registrar en caja y pagos (JSON disco persistente)
+            _registrar_caja_json(ref)
+            _registrar_pagos_json(ref, numero_orden)
 
-            # Registrar en caja
-            caja_path = CAJA_DIR / f"{mes}.json"
-            caja      = _load_json(caja_path)
-            caja.setdefault(ref["date"], {}).setdefault(ref["professional"], {})[ref["time"]] = {
-                "arrival_status": "paid",
-                "pagado":         True,
-                "tipo_atencion":  ref.get("tipo_atencion", "particular"),
-                "monto":          ref["monto"],
-                "es_gratuito":    False,
-            }
-            _save_json(caja_path, caja)
-
-            # Registrar en pagos
-            pagos_path = PAGOS_DIR / f"{mes}.json"
-            pagos      = _load_json(pagos_path)
-            pagos.setdefault(ref["date"], {}).setdefault(ref["professional"], {})[ref["time"]] = {
-                "rut":              ref.get("rut", ""),
-                "tipo_atencion":    ref.get("tipo_atencion", "particular"),
-                "monto":            ref["monto"],
-                "es_gratuito":      False,
-                "metodo_pago":      "flow",
-                "numero_operacion": str(estado.get("flowOrder", "")),
-                "banco_origen":     None,
-                "pagado_at":        datetime.now().isoformat(timespec="seconds"),
-                "pagado_por":       "flow_online",
-                "anulado":          False,
-                "anulacion_motivo": None,
-                "anulacion_at":     None,
-                "anulado_por":      None,
-            }
-            _save_json(pagos_path, pagos)
-
-        # Email confirmación de pago exitoso
+        # Email según tipo de atención
         email = ref.get("email", "")
         if email:
+            nombre = _get_nombre_paciente(ref.get("rut", ""))
             try:
-                from notifications.email_pagos import enviar_confirmacion_pago
-                nombre = _get_nombre_paciente(ref.get("rut", ""))
-                enviar_confirmacion_pago(
-                    email_paciente=email,
-                    nombre_paciente=nombre,
-                    fecha=ref["date"],
-                    hora=ref["time"],
-                    profesional_nombre=ref["professional"],
-                    monto=ref["monto"],
-                    numero_orden=str(estado.get("flowOrder", ""))
-                )
+                if tipo_atencion == "telemedicina":
+                    from notifications.email_centros import enviar_pago_telemedicina
+                    enviar_pago_telemedicina(
+                        scope=ref.get("scope", "ica"),
+                        email_paciente=email,
+                        nombre_paciente=nombre,
+                        fecha=ref["date"],
+                        hora=ref["time"],
+                        profesional_nombre=ref["professional"],
+                        monto=ref["monto"],
+                        numero_orden=numero_orden,
+                    )
+                else:
+                    from notifications.email_pagos import enviar_confirmacion_pago
+                    enviar_confirmacion_pago(
+                        email_paciente=email,
+                        nombre_paciente=nombre,
+                        fecha=ref["date"],
+                        hora=ref["time"],
+                        profesional_nombre=ref["professional"],
+                        monto=ref["monto"],
+                        numero_orden=numero_orden,
+                    )
             except Exception as e:
                 print(f"⚠️ Error enviando email pago: {e}")
 
@@ -299,7 +329,7 @@ async def flow_retorno(request: Request):
         from modules.pagos.flow_client import obtener_estado_pago
         estado = obtener_estado_pago(token)
         pagado = estado.get("status") == 2
-    except:
+    except Exception:
         pagado = False
 
     if pagado:
