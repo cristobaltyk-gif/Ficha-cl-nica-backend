@@ -88,6 +88,96 @@ def _enviar_confirmacion_reserva(rut, date, time, professional) -> None:
         print(f"⚠️ No se pudo enviar email de confirmación: {e}")
 
 
+def _enviar_confirmacion_telemedicina(rut, date, time, professional, scope="ica") -> None:
+    """
+    Para slots de telemedicina:
+    - Obtiene monto por profesional desde caja_config
+    - Genera link de pago Flow
+    - Guarda token Flow en pagos_flow.json
+    - Envía correo con link de pago directo
+    """
+    try:
+        from notifications.email_centros import enviar_reserva_telemedicina
+        from modules.pagos.flow_client import crear_pago
+        from modules.caja.caja_config_helper import get_valor_tipo
+        import json, secrets
+        from datetime import datetime, timezone
+        from pathlib import Path
+
+        admin = _load_admin(rut)
+        if not admin:
+            return
+        email = admin.get("email", "").strip()
+        if not email:
+            return
+
+        nombre      = f"{admin.get('nombre', '')} {admin.get('apellido_paterno', '')}".strip()
+        nombre_prof = _get_professional_name(professional)
+        monto       = get_valor_tipo(professional, "telemedicina")
+
+        if monto <= 0:
+            print(f"⚠️ Telemedicina sin monto para {professional}, no se genera pago")
+            return
+
+        import os
+        BACKEND_URL = os.getenv("BACKEND_URL", "https://services.icarticular.cl")
+
+        pago_id   = f"TELE-{date}-{professional}-{time.replace(':','')}"
+        resultado = crear_pago(
+            id_pago=pago_id,
+            amount=monto,
+            subject=f"Consulta telemedicina · {date} {time}",
+            email=email,
+            url_confirmation=f"{BACKEND_URL}/api/flow/webhook",
+            url_return=f"{BACKEND_URL}/api/flow/retorno",
+            optional_data={
+                "date":          date,
+                "time":          time,
+                "professional":  professional,
+                "rut":           rut,
+                "tipo_atencion": "telemedicina",
+                "scope":         scope,
+            }
+        )
+        payment_url = f"{resultado['url']}?token={resultado['token']}"
+
+        # Guardar token Flow en pagos_flow.json (disco persistente)
+        PAGOS_FLOW_PATH = Path("/data/pagos_flow.json")
+        try:
+            pagos_flow = json.loads(PAGOS_FLOW_PATH.read_text()) if PAGOS_FLOW_PATH.exists() else {}
+        except Exception:
+            pagos_flow = {}
+
+        pagos_flow[resultado["token"]] = {
+            "date":          date,
+            "time":          time,
+            "professional":  professional,
+            "rut":           rut,
+            "email":         email,
+            "monto":         monto,
+            "tipo_atencion": "telemedicina",
+            "scope":         scope,
+            "created_at":    datetime.now(timezone.utc).isoformat(),
+        }
+        PAGOS_FLOW_PATH.parent.mkdir(parents=True, exist_ok=True)
+        PAGOS_FLOW_PATH.write_text(json.dumps(pagos_flow, indent=2, ensure_ascii=False))
+
+        enviar_reserva_telemedicina(
+            scope=scope,
+            email_paciente=email,
+            nombre_paciente=nombre,
+            fecha=date,
+            hora=time,
+            profesional_nombre=nombre_prof,
+            monto=monto,
+            payment_url=payment_url,
+        )
+        print(f"✅ Email telemedicina enviado → {email} · {date} {time}")
+
+    except Exception as e:
+        print(f"⚠️ No se pudo enviar email telemedicina: {e}")
+
+
 # ══════════════════════════════════════════════════════════════
 # LECTURAS
 # ══════════════════════════════════════════════════════════════
@@ -134,7 +224,7 @@ def create_slot(req: CreateSlotRequest) -> MutationResult:
     assert_future_slot(req.date, req.time)
 
     professional = req.professional
-    rut = normalize_rut(req.rut)
+    rut          = normalize_rut(req.rut)
 
     _assert_free(req.date, req.time, professional)
 
@@ -147,7 +237,10 @@ def create_slot(req: CreateSlotRequest) -> MutationResult:
         tipo=req.tipo,
     )
 
-    _enviar_confirmacion_reserva(rut, req.date, req.time, professional)
+    if req.tipo == "telemedicina":
+        _enviar_confirmacion_telemedicina(rut, req.date, req.time, professional)
+    else:
+        _enviar_confirmacion_reserva(rut, req.date, req.time, professional)
 
     return MutationResult(
         ok=True,
@@ -265,4 +358,4 @@ def reschedule(req: RescheduleRequest) -> MutationResult:
 def daily_cleanup() -> None:
     keep_from = today_utc().isoformat()
     store.cleanup_past(keep_from_date=keep_from)
-        
+                  
