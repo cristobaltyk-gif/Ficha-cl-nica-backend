@@ -120,12 +120,14 @@ def create_paciente(data: Dict[str, Any]) -> Dict[str, Any]:
                     rut, nombre, apellido_paterno, apellido_materno,
                     fecha_nacimiento, sexo, email, telefono,
                     direccion, ciudad, prevision, ocupacion,
-                    extra, created_at, updated_at
+                    extra, consentimiento_datos, consentimiento_fecha,
+                    consentimiento_registrado_por, created_at, updated_at
                 ) VALUES (
                     %(rut)s, %(nombre)s, %(apellido_paterno)s, %(apellido_materno)s,
                     %(fecha_nacimiento)s, %(sexo)s, %(email)s, %(telefono)s,
                     %(direccion)s, %(ciudad)s, %(prevision)s, %(ocupacion)s,
-                    %(extra)s, %(created_at)s, %(updated_at)s
+                    %(extra)s, %(consentimiento_datos)s, %(consentimiento_fecha)s,
+                    %(consentimiento_registrado_por)s, %(created_at)s, %(updated_at)s
                 ) RETURNING *
             """, {
                 "rut": data["rut"], "nombre": data.get("nombre", ""),
@@ -137,6 +139,9 @@ def create_paciente(data: Dict[str, Any]) -> Dict[str, Any]:
                 "ciudad": data.get("ciudad", ""), "prevision": data.get("prevision", ""),
                 "ocupacion": data.get("ocupacion", ""),
                 "extra": json.dumps(data.get("extra", {})),
+                "consentimiento_datos": data.get("consentimiento_datos", False),
+                "consentimiento_fecha": data.get("consentimiento_fecha"),
+                "consentimiento_registrado_por": data.get("consentimiento_registrado_por"),
                 "created_at": now, "updated_at": now,
             })
             conn.commit()
@@ -153,7 +158,11 @@ def update_paciente(rut: str, data: Dict[str, Any]) -> Dict[str, Any]:
                     apellido_materno=%(apellido_materno)s, fecha_nacimiento=%(fecha_nacimiento)s,
                     sexo=%(sexo)s, email=%(email)s, telefono=%(telefono)s,
                     direccion=%(direccion)s, ciudad=%(ciudad)s, prevision=%(prevision)s,
-                    ocupacion=%(ocupacion)s, extra=%(extra)s, updated_at=%(updated_at)s
+                    ocupacion=%(ocupacion)s, extra=%(extra)s,
+                    consentimiento_datos=%(consentimiento_datos)s,
+                    consentimiento_fecha=%(consentimiento_fecha)s,
+                    consentimiento_registrado_por=%(consentimiento_registrado_por)s,
+                    updated_at=%(updated_at)s
                 WHERE rut=%(rut)s RETURNING *
             """, {
                 "rut": rut, "nombre": data.get("nombre", ""),
@@ -164,7 +173,11 @@ def update_paciente(rut: str, data: Dict[str, Any]) -> Dict[str, Any]:
                 "telefono": data.get("telefono", ""), "direccion": data.get("direccion", ""),
                 "ciudad": data.get("ciudad", ""), "prevision": data.get("prevision", ""),
                 "ocupacion": data.get("ocupacion", ""),
-                "extra": json.dumps(data.get("extra", {})), "updated_at": now,
+                "extra": json.dumps(data.get("extra", {})),
+                "consentimiento_datos": data.get("consentimiento_datos"),
+                "consentimiento_fecha": data.get("consentimiento_fecha"),
+                "consentimiento_registrado_por": data.get("consentimiento_registrado_por"),
+                "updated_at": now,
             })
             conn.commit()
             return dict(cur.fetchone())
@@ -339,7 +352,7 @@ def delete_caja_slot(date: str, professional: str, time: str) -> None:
 def get_pagos_day(date: str, professional: str) -> dict:
     with _get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT time, data FROM pagos WHERE date=%s AND professional=%s", (date, professional))
+                        cur.execute("SELECT time, data FROM pagos WHERE date=%s AND professional=%s", (date, professional))
             return {row["time"]: dict(row["data"]) for row in cur.fetchall()}
 
 def get_pagos_mes(mes: str) -> list:
@@ -692,4 +705,6 @@ def get_usuarios_centro(centro_id: str) -> List[Dict[str, Any]]:
                 ORDER BY id
             """, (centro_id,))
             return [dict(r) for r in cur.fetchall()]
-                                                                                
+
+                        
+        
