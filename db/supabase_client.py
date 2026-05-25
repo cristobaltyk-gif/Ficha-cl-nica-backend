@@ -352,7 +352,7 @@ def delete_caja_slot(date: str, professional: str, time: str) -> None:
 def get_pagos_day(date: str, professional: str) -> dict:
     with _get_conn() as conn:
         with conn.cursor() as cur:
-                        cur.execute("SELECT time, data FROM pagos WHERE date=%s AND professional=%s", (date, professional))
+            cur.execute("SELECT time, data FROM pagos WHERE date=%s AND professional=%s", (date, professional))
             return {row["time"]: dict(row["data"]) for row in cur.fetchall()}
 
 def get_pagos_mes(mes: str) -> list:
@@ -706,5 +706,3 @@ def get_usuarios_centro(centro_id: str) -> List[Dict[str, Any]]:
             """, (centro_id,))
             return [dict(r) for r in cur.fetchall()]
 
-                        
-        
